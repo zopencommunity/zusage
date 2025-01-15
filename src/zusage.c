@@ -15,109 +15,127 @@
 
 
 size_t write_data(void *ptr, size_t size, size_t nmemb, FILE *stream) {
-    return size * nmemb;
+    if (!ptr || !stream) {
+        return 0; // Gracefully handle invalid input
+    }
+    return fwrite(ptr, size, nmemb, stream);
 }
 
 int is_ibm_domain(const char *hostname) {
+    if (!hostname) {
+        return 0; // Null hostname is not an IBM domain
+    }
     return strstr(hostname, "ibm.com") != NULL;
 }
 
 void get_fqdn(char *fqdn, size_t size) {
+    if (!fqdn || size == 0) {
+        return; // Avoid invalid input
+    }
+
     char hostname[256];
-    struct addrinfo hints, *res;
+    struct addrinfo hints, *res = NULL;
     int ret;
 
-    gethostname(hostname, sizeof(hostname));
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
+    if (gethostname(hostname, sizeof(hostname)) == 0) {
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
 
-    ret = getaddrinfo(hostname, NULL, &hints, &res);
-    if (ret == 0 && res) {
-        getnameinfo(res->ai_addr, res->ai_addrlen, fqdn, size, NULL, 0, 0);
-        freeaddrinfo(res);
-    } else {
-        strncpy(fqdn, hostname, size - 1);
+        ret = getaddrinfo(hostname, NULL, &hints, &res);
+        if (ret == 0 && res) {
+            getnameinfo(res->ai_addr, res->ai_addrlen, fqdn, size, NULL, 0, 0);
+        } else {
+            strncpy(fqdn, hostname, size - 1);
+        }
         fqdn[size - 1] = '\0';
+    } else {
+        strncpy(fqdn, "unknown", size - 1);
+        fqdn[size - 1] = '\0';
+    }
+
+    if (res) {
+        freeaddrinfo(res);
     }
 }
 
 void get_system_info(char **os_release, char **cpu_arch) {
+    if (!os_release || !cpu_arch) {
+        return; // Avoid null pointer dereferences
+    }
+
     struct utsname uname_data;
-    uname(&uname_data);
-
-    *os_release = malloc(strlen(uname_data.release) + 1);
-    strcpy(*os_release, uname_data.release);
-
-    *cpu_arch = malloc(strlen(uname_data.machine) + 1);
-    strcpy(*cpu_arch, uname_data.machine);
+    if (uname(&uname_data) == 0) {
+        *os_release = strdup(uname_data.release);
+        *cpu_arch = strdup(uname_data.machine);
+    } else {
+        *os_release = strdup("unknown");
+        *cpu_arch = strdup("unknown");
+    }
 }
 
 void get_local_ip(char *local_ip, size_t size) {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in serv;
+    if (!local_ip || size == 0) return;
 
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
-        strncpy(local_ip, "127.0.0.1", size);
+        strncpy(local_ip, "127.0.0.1", size - 1);
+        local_ip[size - 1] = '\0';
         return;
     }
 
-    memset(&serv, 0, sizeof(serv));
+    struct sockaddr_in serv = {0};
     serv.sin_family = AF_INET;
     serv.sin_port = htons(80);
     inet_pton(AF_INET, "8.8.8.8", &serv.sin_addr);
 
     if (connect(sock, (struct sockaddr *)&serv, sizeof(serv)) == 0) {
-        struct sockaddr_in local;
+        struct sockaddr_in local = {0};
         socklen_t local_len = sizeof(local);
         if (getsockname(sock, (struct sockaddr *)&local, &local_len) == 0) {
             inet_ntop(AF_INET, &local.sin_addr, local_ip, size);
         } else {
-            strncpy(local_ip, "127.0.0.1", size);
+            strncpy(local_ip, "127.0.0.1", size - 1);
         }
     } else {
-        strncpy(local_ip, "127.0.0.1", size);
+        strncpy(local_ip, "127.0.0.1", size - 1);
     }
 
+    local_ip[size - 1] = '\0';
     close(sock);
 }
 
 char *get_app_version() {
     char *app_version = malloc(256);
     if (!app_version) {
-        perror("malloc failed");
-        return strdup("unknown"); // Return a dynamically allocated string for consistency
+        return strdup("unknown");
     }
 
     char *program_dir = __getprogramdir();
-    if (program_dir == NULL) {
-        strcpy(app_version, "unknown");
-    } else {
-        // Construct path to .version file in parent directory
-        char version_file_path[1024];
-        snprintf(version_file_path, sizeof(version_file_path), "%s/../.version", program_dir);
+    if (!program_dir) {
+        strncpy(app_version, "unknown", 255);
+        app_version[255] = '\0';
+        return app_version;
+    }
 
-        // Check if the .version file exists
-        struct stat buffer;
-        if (stat(version_file_path, &buffer) == 0) {
-            FILE *version_file = fopen(version_file_path, "r");
-            if (version_file) {
-                if (fgets(app_version, 256, version_file) != NULL) {
-                    // Remove trailing newline
-                    size_t len = strlen(app_version);
-                    if (len > 0 && app_version[len - 1] == '\n') {
-                        app_version[len - 1] = '\0';
-                    }
-                } else {
-                    strcpy(app_version, "unknown");
-                }
-                fclose(version_file);
-            } else {
-                strcpy(app_version, "unknown");
+    char version_file_path[1024];
+    snprintf(version_file_path, sizeof(version_file_path), "%s/../.version", program_dir);
+
+    FILE *version_file = fopen(version_file_path, "r");
+    if (version_file) {
+        if (fgets(app_version, 256, version_file)) {
+            size_t len = strlen(app_version);
+            if (len > 0 && app_version[len - 1] == '\n') {
+                app_version[len - 1] = '\0'; // Remove trailing newline
             }
         } else {
-            strcpy(app_version, "unknown");
+            strncpy(app_version, "unknown", 255);
+            app_version[255] = '\0';
         }
+        fclose(version_file);
+    } else {
+        strncpy(app_version, "unknown", 255);
+        app_version[255] = '\0';
     }
 
     return app_version;
@@ -225,9 +243,10 @@ void usage_analytics_init() {
     }
 }
 
+#ifdef ZUSAGE_TEST_MAIN
 int main() {
     // Main program logic
-  sleep(1);
+    sleep(1);
     return 0;
 }
-
+#endif
