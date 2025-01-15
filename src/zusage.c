@@ -13,240 +13,274 @@
 #include <netinet/in.h>
 #include <sys/stat.h>
 
+// Macro guard for timing code
+#ifdef ZUSAGE_TIMING
+#define START_TIMER clock_t start_time = clock();
+#define END_TIMER(label) \
+  duration = (double)(clock() - start_time) / CLOCKS_PER_SEC; \
+  print_debug("%s: %.6f seconds", label, duration);
+#else
+#define START_TIMER
+#define END_TIMER(label)
+#endif
+
+// Function to print debug messages based on the environment variable
+void print_debug(const char *format, ...) {
+  if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
+    va_list args;
+    va_start(args, format);
+    fprintf(stderr, "DEBUG: ");
+    vfprintf(stderr, format, args);
+    fprintf(stderr, "\n");
+    va_end(args);
+  }
+}
 
 size_t write_data(void *ptr, size_t size, size_t nmemb, FILE *stream) {
-    if (!ptr || !stream) {
-        return 0; // Gracefully handle invalid input
-    }
-    return fwrite(ptr, size, nmemb, stream);
+  if (!ptr || !stream) {
+    print_debug("write_data: Invalid input parameters.");
+    return 0; // Gracefully handle invalid input
+  }
+  return fwrite(ptr, size, nmemb, stream);
 }
 
 int is_ibm_domain(const char *hostname) {
-    if (!hostname) {
-        return 0; // Null hostname is not an IBM domain
-    }
-    return strstr(hostname, "ibm.com") != NULL;
+  if (!hostname) {
+    print_debug("is_ibm_domain: Null hostname provided.");
+    return 0; // Null hostname is not an IBM domain
+  }
+  return strstr(hostname, "ibm.com") != NULL;
 }
 
 void get_fqdn(char *fqdn, size_t size) {
-    if (!fqdn || size == 0) {
-        return; // Avoid invalid input
-    }
+  if (!fqdn || size == 0) {
+    print_debug("get_fqdn: Invalid input parameters.");
+    return; // Avoid invalid input
+  }
 
-    char hostname[256];
-    struct addrinfo hints, *res = NULL;
-    int ret;
+  char hostname[256];
+  struct addrinfo hints, *res = NULL;
+  int ret;
 
-    if (gethostname(hostname, sizeof(hostname)) == 0) {
-        memset(&hints, 0, sizeof(hints));
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
+  if (gethostname(hostname, sizeof(hostname)) == 0) {
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
 
-        ret = getaddrinfo(hostname, NULL, &hints, &res);
-        if (ret == 0 && res) {
-            getnameinfo(res->ai_addr, res->ai_addrlen, fqdn, size, NULL, 0, 0);
-        } else {
-            strncpy(fqdn, hostname, size - 1);
-        }
-        fqdn[size - 1] = '\0';
+    ret = getaddrinfo(hostname, NULL, &hints, &res);
+    if (ret == 0 && res) {
+      getnameinfo(res->ai_addr, res->ai_addrlen, fqdn, size, NULL, 0, 0);
+      print_debug("get_fqdn: Resolved FQDN: %s", fqdn);
     } else {
-        strncpy(fqdn, "unknown", size - 1);
-        fqdn[size - 1] = '\0';
+      strncpy(fqdn, hostname, size - 1);
+      print_debug("get_fqdn: Failed to resolve FQDN, using hostname: %s", fqdn);
     }
+    fqdn[size - 1] = '\0';
+  } else {
+    strncpy(fqdn, "unknown", size - 1);
+    fqdn[size - 1] = '\0';
+    print_debug("get_fqdn: Failed to get hostname, using 'unknown'");
+  }
 
-    if (res) {
-        freeaddrinfo(res);
-    }
+  if (res) {
+    freeaddrinfo(res);
+  }
 }
 
 void get_system_info(char **os_release, char **cpu_arch) {
-    if (!os_release || !cpu_arch) {
-        return; // Avoid null pointer dereferences
-    }
+  if (!os_release || !cpu_arch) {
+    print_debug("get_system_info: Invalid input parameters.");
+    return; // Avoid null pointer dereferences
+  }
 
-    struct utsname uname_data;
-    if (uname(&uname_data) == 0) {
-        *os_release = strdup(uname_data.release);
-        *cpu_arch = strdup(uname_data.machine);
-    } else {
-        *os_release = strdup("unknown");
-        *cpu_arch = strdup("unknown");
-    }
+  struct utsname uname_data;
+  if (uname(&uname_data) == 0) {
+    *os_release = strdup(uname_data.release);
+    *cpu_arch = strdup(uname_data.machine);
+    print_debug("get_system_info: OS Release: %s, CPU Arch: %s", *os_release, *cpu_arch);
+  } else {
+    *os_release = strdup("unknown");
+    *cpu_arch = strdup("unknown");
+    print_debug("get_system_info: Failed to get system info, using 'unknown'");
+  }
 }
 
 void get_local_ip(char *local_ip, size_t size) {
-    if (!local_ip || size == 0) return;
+  if (!local_ip || size == 0) {
+    print_debug("get_local_ip: Invalid input parameters.");
+    return;
+  }
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        strncpy(local_ip, "127.0.0.1", size - 1);
-        local_ip[size - 1] = '\0';
-        return;
-    }
-
-    struct sockaddr_in serv = {0};
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(80);
-    inet_pton(AF_INET, "8.8.8.8", &serv.sin_addr);
-
-    if (connect(sock, (struct sockaddr *)&serv, sizeof(serv)) == 0) {
-        struct sockaddr_in local = {0};
-        socklen_t local_len = sizeof(local);
-        if (getsockname(sock, (struct sockaddr *)&local, &local_len) == 0) {
-            inet_ntop(AF_INET, &local.sin_addr, local_ip, size);
-        } else {
-            strncpy(local_ip, "127.0.0.1", size - 1);
-        }
-    } else {
-        strncpy(local_ip, "127.0.0.1", size - 1);
-    }
-
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    strncpy(local_ip, "127.0.0.1", size - 1);
     local_ip[size - 1] = '\0';
-    close(sock);
+    print_debug("get_local_ip: Failed to create socket, using '127.0.0.1'");
+    return;
+  }
+
+  struct sockaddr_in serv = {0};
+  serv.sin_family = AF_INET;
+  serv.sin_port = htons(80);
+  inet_pton(AF_INET, "8.8.8.8", &serv.sin_addr);
+
+  if (connect(sock, (struct sockaddr *)&serv, sizeof(serv)) == 0) {
+    struct sockaddr_in local = {0};
+    socklen_t local_len = sizeof(local);
+    if (getsockname(sock, (struct sockaddr *)&local, &local_len) == 0) {
+      inet_ntop(AF_INET, &local.sin_addr, local_ip, size);
+      print_debug("get_local_ip: Resolved local IP: %s", local_ip);
+    } else {
+      strncpy(local_ip, "127.0.0.1", size - 1);
+      print_debug("get_local_ip: Failed to get local IP, using '127.0.0.1'");
+    }
+  } else {
+    strncpy(local_ip, "127.0.0.1", size - 1);
+    print_debug("get_local_ip: Failed to connect, using '127.0.0.1'");
+  }
+
+  local_ip[size - 1] = '\0';
+  close(sock);
 }
 
 char *get_app_version() {
-    char *app_version = malloc(256);
-    if (!app_version) {
-        return strdup("unknown");
-    }
+  char *app_version = malloc(256);
+  if (!app_version) {
+    print_debug("get_app_version: Memory allocation failed.");
+    return strdup("unknown");
+  }
 
-    char *program_dir = __getprogramdir();
-    if (!program_dir) {
-        strncpy(app_version, "unknown", 255);
-        app_version[255] = '\0';
-        return app_version;
-    }
-
-    char version_file_path[1024];
-    snprintf(version_file_path, sizeof(version_file_path), "%s/../.version", program_dir);
-
-    FILE *version_file = fopen(version_file_path, "r");
-    if (version_file) {
-        if (fgets(app_version, 256, version_file)) {
-            size_t len = strlen(app_version);
-            if (len > 0 && app_version[len - 1] == '\n') {
-                app_version[len - 1] = '\0'; // Remove trailing newline
-            }
-        } else {
-            strncpy(app_version, "unknown", 255);
-            app_version[255] = '\0';
-        }
-        fclose(version_file);
-    } else {
-        strncpy(app_version, "unknown", 255);
-        app_version[255] = '\0';
-    }
-
+  char *program_dir = __getprogramdir();
+  if (!program_dir) {
+    strncpy(app_version, "unknown", 255);
+    app_version[255] = '\0';
+    print_debug("get_app_version: Failed to get program directory, using 'unknown'");
     return app_version;
+  }
+
+  char version_file_path[1024];
+  snprintf(version_file_path, sizeof(version_file_path), "%s/../.version", program_dir);
+
+  FILE *version_file = fopen(version_file_path, "r");
+  if (version_file) {
+    if (fgets(app_version, 256, version_file)) {
+      size_t len = strlen(app_version);
+      if (len > 0 && app_version[len - 1] == '\n') {
+        app_version[len - 1] = '\0'; // Remove trailing newline
+      }
+      print_debug("get_app_version: Resolved app version: %s", app_version);
+    } else {
+      strncpy(app_version, "unknown", 255);
+      app_version[255] = '\0';
+      print_debug("get_app_version: Failed to read version file, using 'unknown'");
+    }
+    fclose(version_file);
+  } else {
+    strncpy(app_version, "unknown", 255);
+    app_version[255] = '\0';
+    print_debug("get_app_version: Failed to open version file, using 'unknown'");
+  }
+
+  return app_version;
 }
 
 void *send_usage_data_thread(void *arg) {
-    CURL *easy_handle;
-    double duration;
-    CURLcode res;
+  CURL *easy_handle;
+  double duration;
+  CURLcode res;
 
-    // Measure start time
-    clock_t start_time = clock();
+  // Measure start time
+  START_TIMER;
 
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("1. Total duration: %.6f seconds\n", duration);
-    char fqdn[256];
-    get_fqdn(fqdn, sizeof(fqdn));
+  END_TIMER("1. Initial setup");
+  char fqdn[256];
+  get_fqdn(fqdn, sizeof(fqdn));
 
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("2. Total duration: %.6f seconds\n", duration);
-    if (!is_ibm_domain(fqdn)) {
-        fprintf(stderr, "Skipping usage collection for non-IBM domain: %s\n", fqdn);
-        return NULL;
-    }
+  END_TIMER("2. After get_fqdn");
+  if (!is_ibm_domain(fqdn)) {
+    fprintf(stderr, "Skipping usage collection for non-IBM domain: %s\n", fqdn);
+    return NULL;
+  }
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-    easy_handle = curl_easy_init();
+  curl_global_init(CURL_GLOBAL_DEFAULT);
+  easy_handle = curl_easy_init();
 
-    if (easy_handle) {
-        const char *app_name = getprogname();
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("3. Total duration: %.6f seconds\n", duration);
+  if (easy_handle) {
+    const char *app_name = getprogname();
+    END_TIMER("3. After getprogname");
 
-        char local_ip[INET_ADDRSTRLEN];
-        get_local_ip(local_ip, sizeof(local_ip));
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("4. Total duration: %.6f seconds\n", duration);
+    char local_ip[INET_ADDRSTRLEN];
+    get_local_ip(local_ip, sizeof(local_ip));
+    END_TIMER("4. After get_local_ip");
 
-        char *os_release = NULL;
-        char *cpu_arch = NULL;
-        get_system_info(&os_release, &cpu_arch);
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("5. Total duration: %.6f seconds\n", duration);
+    char *os_release = NULL;
+    char *cpu_arch = NULL;
+    get_system_info(&os_release, &cpu_arch);
+    END_TIMER("5. After get_system_info");
 
-        char *app_version = get_app_version();
+    char *app_version = get_app_version();
 
-        time_t now = time(NULL);
-        struct tm *timeinfo = gmtime(&now);
-        char timestamp[25];
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("6. Total duration: %.6f seconds\n", duration);
+    time_t now = time(NULL);
+    struct tm *timeinfo = gmtime(&now);
+    char timestamp[25];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
+    END_TIMER("6. After timestamp");
 
-        char *url = "http://rogi21.fyre.ibm.com:3000/usage";
+    char *url = "http://rogi21.fyre.ibm.com:3000/usage";
 
-        char post_data[4096];
-        snprintf(post_data, sizeof(post_data),
-                 "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
-                 app_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp);
+    char post_data[4096];
+    snprintf(post_data, sizeof(post_data),
+             "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
+             app_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp);
 
-        if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
-            fprintf(stderr, "DEBUG: Sending usage data:\n");
-            fprintf(stderr, "DEBUG: URL: %s\n", url);
-            fprintf(stderr, "DEBUG: POST data: %s\n", post_data);
-        }
+    print_debug("Sending usage data:");
+    print_debug("URL: %s", url);
+    print_debug("POST data: %s", post_data);
 
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(easy_handle, CURLOPT_HTTPHEADER, headers);
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("7. Total duration: %.6f seconds\n", duration);
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    curl_easy_setopt(easy_handle, CURLOPT_HTTPHEADER, headers);
+    END_TIMER("7. After curl setup");
 
     curl_easy_setopt(easy_handle, CURLOPT_URL, url);
     curl_easy_setopt(easy_handle, CURLOPT_POSTFIELDS, post_data);
     curl_easy_setopt(easy_handle, CURLOPT_POSTFIELDSIZE, (long)strlen(post_data));
-
     curl_easy_setopt(easy_handle, CURLOPT_NOSIGNAL, 1L);
 
-    curl_easy_perform(easy_handle);
+    res = curl_easy_perform(easy_handle);
+
+    if (res != CURLE_OK)
+      print_debug("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
 
     // Calculate and print the duration
- // Measure end time
-    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("\n8. Total duration: %.6f seconds\n", duration);
+    END_TIMER("8. After curl_easy_perform");
 
     // Cleanup after the call, regardless of whether it has finished
     curl_easy_cleanup(easy_handle);
 
-        free(os_release);
-        free(cpu_arch);
-        free(app_version);
-    }
+    free(os_release);
+    free(cpu_arch);
+    free(app_version);
+  }
 
-    curl_global_cleanup();
-    
+  curl_global_cleanup();
+  return NULL;
 }
 
 __attribute__((constructor))
 void usage_analytics_init() {
-    pthread_t thread_id;
-    if (pthread_create(&thread_id, NULL, send_usage_data_thread, NULL) != 0) {
-        fprintf(stderr, "Failed to create thread for usage analytics\n");
-    } else {
-        pthread_detach(thread_id); // Ensure resources are cleaned up when thread exits
-    }
+  pthread_t thread_id;
+  if (pthread_create(&thread_id, NULL, send_usage_data_thread, NULL) != 0) {
+    fprintf(stderr, "Failed to create thread for usage analytics\n");
+  } else {
+    pthread_detach(thread_id); // Ensure resources are cleaned up when thread exits
+  }
 }
 
 #ifdef ZUSAGE_TEST_MAIN
 int main() {
-    // Main program logic
-    sleep(1);
-    return 0;
+  // Main program logic
+  sleep(1);
+  return 0;
 }
 #endif
