@@ -46,8 +46,8 @@ void get_system_info(char **os_release, char **cpu_arch) {
     struct utsname uname_data;
     uname(&uname_data);
 
-    *os_release = malloc(strlen(uname_data.sysname) + strlen(uname_data.release) + 2);
-    sprintf(*os_release, "%s %s", uname_data.sysname, uname_data.release);
+    *os_release = malloc(strlen(uname_data.release) + 1);
+    strcpy(*os_release, uname_data.release);
 
     *cpu_arch = malloc(strlen(uname_data.machine) + 1);
     strcpy(*cpu_arch, uname_data.machine);
@@ -82,22 +82,28 @@ void get_local_ip(char *local_ip, size_t size) {
     close(sock);
 }
 
-char *get_app_version(const char *argv0) {
+char *get_app_version() {
     char *app_version = malloc(256);
-    char *last_slash = strrchr(argv0, '/');
+    if (!app_version) {
+        perror("malloc failed");
+        return strdup("unknown"); // Return a dynamically allocated string for consistency
+    }
 
-    if (last_slash == NULL) {
+    char *program_dir = __getprogramdir();
+    if (program_dir == NULL) {
         strcpy(app_version, "unknown");
     } else {
-        char *parent_dir = strndup(argv0, last_slash - argv0);
-        char version_file_path[512];
-        snprintf(version_file_path, sizeof(version_file_path), "%s/.version", parent_dir);
+        // Construct path to .version file in parent directory
+        char version_file_path[1024];
+        snprintf(version_file_path, sizeof(version_file_path), "%s/../.version", program_dir);
 
+        // Check if the .version file exists
         struct stat buffer;
         if (stat(version_file_path, &buffer) == 0) {
             FILE *version_file = fopen(version_file_path, "r");
             if (version_file) {
                 if (fgets(app_version, 256, version_file) != NULL) {
+                    // Remove trailing newline
                     size_t len = strlen(app_version);
                     if (len > 0 && app_version[len - 1] == '\n') {
                         app_version[len - 1] = '\0';
@@ -106,12 +112,14 @@ char *get_app_version(const char *argv0) {
                     strcpy(app_version, "unknown");
                 }
                 fclose(version_file);
+            } else {
+                strcpy(app_version, "unknown");
             }
         } else {
             strcpy(app_version, "unknown");
         }
-        free(parent_dir);
     }
+
     return app_version;
 }
 
@@ -126,7 +134,7 @@ void *send_usage_data_thread(void *arg) {
     duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
     printf("1. Total duration: %.6f seconds\n", duration);
     char fqdn[256];
-    get_fqdn(fqdn, sizeof(fqdn)); // This call is the biggest cost now
+    get_fqdn(fqdn, sizeof(fqdn));
 
     duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
     printf("2. Total duration: %.6f seconds\n", duration);
@@ -139,7 +147,7 @@ void *send_usage_data_thread(void *arg) {
     easy_handle = curl_easy_init();
 
     if (easy_handle) {
-        const char *program_name = getprogname();
+        const char *app_name = getprogname();
     duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
     printf("3. Total duration: %.6f seconds\n", duration);
 
@@ -154,7 +162,7 @@ void *send_usage_data_thread(void *arg) {
     duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
     printf("5. Total duration: %.6f seconds\n", duration);
 
-        char *app_version = get_app_version(program_name);
+        char *app_version = get_app_version();
 
         time_t now = time(NULL);
         struct tm *timeinfo = gmtime(&now);
@@ -167,8 +175,8 @@ void *send_usage_data_thread(void *arg) {
 
         char post_data[4096];
         snprintf(post_data, sizeof(post_data),
-                 "{\"program_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
-                 program_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp);
+                 "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
+                 app_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp);
 
         if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
             fprintf(stderr, "DEBUG: Sending usage data:\n");
@@ -219,7 +227,7 @@ void usage_analytics_init() {
 
 int main() {
     // Main program logic
-    printf("BLABLA");
+  sleep(1);
     return 0;
 }
 
