@@ -8,53 +8,78 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/utsname.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <sys/stat.h>
 
 size_t write_data(void *ptr, size_t size, size_t nmemb, FILE *stream) {
-  return size * nmemb;
+    return size * nmemb;
 }
 
 int is_ibm_domain(const char *hostname) {
-  return strstr(hostname, "ibm.com") != NULL;
+    return strstr(hostname, "ibm.com") != NULL;
 }
 
-void get_local_ip_and_hostname(char **ip, char **hostname_out) {
-  char hostname[256];
-  struct hostent *host_entry;
+void get_fqdn(char *fqdn, size_t size) {
+    char hostname[256];
+    struct addrinfo hints, *res;
+    int ret;
 
-  gethostname(hostname, sizeof(hostname));
-  host_entry = gethostbyname(hostname);
+    gethostname(hostname, sizeof(hostname));
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
 
-  *ip = malloc(16);
-  if (host_entry == NULL) {
-    strcpy(*ip, "127.0.0.1");
-  } else {
-    strcpy(*ip, inet_ntoa(*((struct in_addr*)host_entry->h_addr_list[0])));
-  }
-
-  *hostname_out = malloc(strlen(hostname) + 1);
-  strcpy(*hostname_out, hostname);
+    ret = getaddrinfo(hostname, NULL, &hints, &res);
+    if (ret == 0 && res) {
+        getnameinfo(res->ai_addr, res->ai_addrlen, fqdn, size, NULL, 0, 0);
+        freeaddrinfo(res);
+    } else {
+        strncpy(fqdn, hostname, size - 1);
+        fqdn[size - 1] = '\0';
+    }
 }
 
-//TODO
-char *get_os_info() {
-  struct utsname uname_data;
-  uname(&uname_data);
-  char *os_info = malloc(strlen(uname_data.sysname) + strlen(uname_data.release) + strlen(uname_data.version) + 3);
-  sprintf(os_info, "%s %s %s", uname_data.sysname, uname_data.release, uname_data.version);
-  return os_info;
+void get_system_info(char **os_release, char **cpu_arch) {
+    struct utsname uname_data;
+    uname(&uname_data);
+
+    *os_release = malloc(strlen(uname_data.sysname) + strlen(uname_data.release) + 2);
+    sprintf(*os_release, "%s %s", uname_data.sysname, uname_data.release);
+
+    *cpu_arch = malloc(strlen(uname_data.machine) + 1);
+    strcpy(*cpu_arch, uname_data.machine);
 }
 
-//TODO:
-char *get_cpu_arch() {
-  struct utsname uname_data;
-  uname(&uname_data);
-  char *cpu_arch = malloc(strlen(uname_data.machine) + 1);
-  strcpy(cpu_arch, uname_data.machine);
-  return cpu_arch;
+void get_local_ip(char *local_ip, size_t size) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in serv;
+
+    if (sock < 0) {
+        strncpy(local_ip, "127.0.0.1", size);
+        return;
+    }
+
+    memset(&serv, 0, sizeof(serv));
+    serv.sin_family = AF_INET;
+    serv.sin_port = htons(80);
+    inet_pton(AF_INET, "8.8.8.8", &serv.sin_addr);
+
+    if (connect(sock, (struct sockaddr *)&serv, sizeof(serv)) == 0) {
+        struct sockaddr_in local;
+        socklen_t local_len = sizeof(local);
+        if (getsockname(sock, (struct sockaddr *)&local, &local_len) == 0) {
+            inet_ntop(AF_INET, &local.sin_addr, local_ip, size);
+        } else {
+            strncpy(local_ip, "127.0.0.1", size);
+        }
+    } else {
+        strncpy(local_ip, "127.0.0.1", size);
+    }
+
+    close(sock);
 }
 
-//TODO
 char *get_app_version(const char *argv0) {
     char *app_version = malloc(256);
     char *last_slash = strrchr(argv0, '/');
@@ -62,136 +87,111 @@ char *get_app_version(const char *argv0) {
     if (last_slash == NULL) {
         strcpy(app_version, "unknown");
     } else {
-      char *parent_dir = strndup(argv0, last_slash - argv0);
-      char version_file_path[512];
-      snprintf(version_file_path, sizeof(version_file_path), "%s/.version", parent_dir);
+        char *parent_dir = strndup(argv0, last_slash - argv0);
+        char version_file_path[512];
+        snprintf(version_file_path, sizeof(version_file_path), "%s/.version", parent_dir);
 
-      // Check if the .version file exists in the parent directory
-      struct stat buffer;
-      if (stat(version_file_path, &buffer) == 0) {
-        FILE *version_file = fopen(version_file_path, "r");
-        if (version_file == NULL) {
-            strcpy(app_version, "unknown");
-        } else {
-            if (fgets(app_version, 256, version_file) == NULL) {
-                strcpy(app_version, "unknown");
-            } else {
-                // Remove trailing newline if present
-                size_t len = strlen(app_version);
-                if (len > 0 && app_version[len - 1] == '\n') {
-                    app_version[len - 1] = '\0';
+        struct stat buffer;
+        if (stat(version_file_path, &buffer) == 0) {
+            FILE *version_file = fopen(version_file_path, "r");
+            if (version_file) {
+                if (fgets(app_version, 256, version_file) != NULL) {
+                    size_t len = strlen(app_version);
+                    if (len > 0 && app_version[len - 1] == '\n') {
+                        app_version[len - 1] = '\0';
+                    }
+                } else {
+                    strcpy(app_version, "unknown");
                 }
+                fclose(version_file);
             }
-            fclose(version_file);
+        } else {
+            strcpy(app_version, "unknown");
         }
-      } else {
-        strcpy(app_version, "unknown");
-      }
-
-      free(parent_dir);
+        free(parent_dir);
     }
     return app_version;
 }
 
+void send_usage_data() {
+    CURL *curl;
+    CURLcode res;
 
-void send_usage_data(int argc, char *argv[]) {
-  CURL *curl;
-  CURLcode res;
+    char fqdn[256];
+    get_fqdn(fqdn, sizeof(fqdn));
 
-  char local_hostname[256];
-  gethostname(local_hostname, sizeof(local_hostname));
-
-  if (!is_ibm_domain(local_hostname)) {
-    fprintf(stderr, "Skipping usage collection for non-IBM domain - %s\n", local_hostname);
-    return;
-  }
-
-  curl_global_init(CURL_GLOBAL_DEFAULT);
-  curl = curl_easy_init();
-
-  if (curl) {
-    // Send the statistics:
-    // Program name, Arguments, Local IP Address, Hostname, OS, Arch, Program Version, Timestamp
-    // TODO: userid, event type (currently startup), can also cover exits
-
-    // 1. Collect Program Name and Arguments using getprogname()
-    const char *program_name = getprogname();
-    char args_str[1024] = "";
-    for (int i = 1; i < argc; i++) {
-      strcat(args_str, argv[i]);
-      if (i < argc - 1) {
-        strcat(args_str, " ");
-      }
+    if (!is_ibm_domain(fqdn)) {
+        fprintf(stderr, "Skipping usage collection for non-IBM domain: %s\n", fqdn);
+        return;
     }
 
-    // 2. Get Local IP Address and Hostname
-    char *local_ip;
-    char *hostname;
-    get_local_ip_and_hostname(&local_ip, &hostname);
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl = curl_easy_init();
 
-    // 3. Get OS Info
-    char *os_info = get_os_info();
+    if (curl) {
+        const char *program_name = getprogname();
 
-    // 4. Get CPU Architecture
-    char *cpu_arch = get_cpu_arch();
+        char local_ip[INET_ADDRSTRLEN];
+        get_local_ip(local_ip, sizeof(local_ip));
 
-    // 5. Get Application Version
-    char *app_version = get_app_version(argv[0]);
+        char *os_release = NULL;
+        char *cpu_arch = NULL;
+        get_system_info(&os_release, &cpu_arch);
 
-    // 6. Get Current Timestamp
-    time_t now = time(NULL);
-    struct tm *timeinfo = localtime(&now);
-    char timestamp[20];
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+        char *app_version = get_app_version(program_name);
 
-    //TODO: Write a server app to collect information
-    char *url = "https://zopen.community/usage";
+        time_t now = time(NULL);
+        struct tm *timeinfo = gmtime(&now);
+        char timestamp[25];
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
 
-    char post_data[4096];
-    sprintf(post_data, "{\"program_name\": \"%s\", \"arguments\": \"%s\", \"local_ip\": \"%s\", \"hostname\": \"%s\", \"os_info\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
-            program_name, args_str, local_ip, hostname, os_info, cpu_arch, app_version, timestamp);
+        char *url = "http://rogi21.fyre.ibm.com:3000/usage";
 
-    if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
-      fprintf(stderr, "DEBUG: Sending usage data:\n");
-      fprintf(stderr, "DEBUG: URL: %s\n", url);
-      fprintf(stderr, "DEBUG: POST data: %s\n", post_data);
+        char post_data[4096];
+        snprintf(post_data, sizeof(post_data),
+                 "{\"program_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
+                 program_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp);
+
+        if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
+            fprintf(stderr, "DEBUG: Sending usage data:\n");
+            fprintf(stderr, "DEBUG: URL: %s\n", url);
+            fprintf(stderr, "DEBUG: POST data: %s\n", post_data);
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(post_data));
+
+        FILE *devnull = fopen("/dev/null", "w");
+        if (devnull) {
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, devnull);
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+            fclose(devnull);
+        }
+
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+        res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+
+        curl_easy_cleanup(curl);
+        free(os_release);
+        free(cpu_arch);
+        free(app_version);
     }
 
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(post_data));
-
-    // Send output to /dev/null to avoid printing the response
-    FILE *devnull = fopen("/dev/null", "w");
-    if (devnull) {
-      curl_easy_setopt(curl, CURLOPT_WRITEDATA, devnull);
-      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-      fclose(devnull);
-    }
-
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-    //TODO: make this async
-    res = curl_easy_perform(curl);
-
-    if (res != CURLE_OK) {
-      fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-    }
-
-    curl_easy_cleanup(curl);
-    free(local_ip);
-    free(hostname);
-    free(os_info);
-    free(cpu_arch);
-    free(app_version);
-  }
-
-  curl_global_cleanup();
+    curl_global_cleanup();
 }
 
 __attribute__((constructor))
-void usage_analytics_init(int argc, char *argv[]) {
-  send_usage_data(argc, argv);
+void usage_analytics_init() {
+    send_usage_data();
 }
 
 int main() {}
+
