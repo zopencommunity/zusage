@@ -1,4 +1,5 @@
 #include "usage_analytics.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
+
 
 size_t write_data(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     return size * nmemb;
@@ -113,30 +115,44 @@ char *get_app_version(const char *argv0) {
     return app_version;
 }
 
-void send_usage_data() {
-    CURL *curl;
+void *send_usage_data_thread(void *arg) {
+    CURL *easy_handle;
+    double duration;
     CURLcode res;
 
-    char fqdn[256];
-    get_fqdn(fqdn, sizeof(fqdn));
+    // Measure start time
+    clock_t start_time = clock();
 
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("1. Total duration: %.6f seconds\n", duration);
+    char fqdn[256];
+    get_fqdn(fqdn, sizeof(fqdn)); // This call is the biggest cost now
+
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("2. Total duration: %.6f seconds\n", duration);
     if (!is_ibm_domain(fqdn)) {
         fprintf(stderr, "Skipping usage collection for non-IBM domain: %s\n", fqdn);
-        return;
+        return NULL;
     }
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    curl = curl_easy_init();
+    easy_handle = curl_easy_init();
 
-    if (curl) {
+    if (easy_handle) {
         const char *program_name = getprogname();
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("3. Total duration: %.6f seconds\n", duration);
 
         char local_ip[INET_ADDRSTRLEN];
         get_local_ip(local_ip, sizeof(local_ip));
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("4. Total duration: %.6f seconds\n", duration);
 
         char *os_release = NULL;
         char *cpu_arch = NULL;
         get_system_info(&os_release, &cpu_arch);
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("5. Total duration: %.6f seconds\n", duration);
 
         char *app_version = get_app_version(program_name);
 
@@ -144,6 +160,8 @@ void send_usage_data() {
         struct tm *timeinfo = gmtime(&now);
         char timestamp[25];
         strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("6. Total duration: %.6f seconds\n", duration);
 
         char *url = "http://rogi21.fyre.ibm.com:3000/usage";
 
@@ -158,40 +176,50 @@ void send_usage_data() {
             fprintf(stderr, "DEBUG: POST data: %s\n", post_data);
         }
 
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(post_data));
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(easy_handle, CURLOPT_HTTPHEADER, headers);
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("7. Total duration: %.6f seconds\n", duration);
 
-        FILE *devnull = fopen("/dev/null", "w");
-        if (devnull) {
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, devnull);
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-            fclose(devnull);
-        }
+    curl_easy_setopt(easy_handle, CURLOPT_URL, url);
+    curl_easy_setopt(easy_handle, CURLOPT_POSTFIELDS, post_data);
+    curl_easy_setopt(easy_handle, CURLOPT_POSTFIELDSIZE, (long)strlen(post_data));
 
-        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(easy_handle, CURLOPT_NOSIGNAL, 1L);
 
-        res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        }
+    curl_easy_perform(easy_handle);
 
-        curl_easy_cleanup(curl);
+    // Calculate and print the duration
+ // Measure end time
+    duration = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    printf("\n8. Total duration: %.6f seconds\n", duration);
+
+    // Cleanup after the call, regardless of whether it has finished
+    curl_easy_cleanup(easy_handle);
+
         free(os_release);
         free(cpu_arch);
         free(app_version);
     }
 
     curl_global_cleanup();
+    
 }
 
 __attribute__((constructor))
 void usage_analytics_init() {
-    send_usage_data();
+    pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, send_usage_data_thread, NULL) != 0) {
+        fprintf(stderr, "Failed to create thread for usage analytics\n");
+    } else {
+        pthread_detach(thread_id); // Ensure resources are cleaned up when thread exits
+    }
 }
 
-int main() {}
+int main() {
+    // Main program logic
+    printf("BLABLA");
+    return 0;
+}
 
