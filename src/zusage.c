@@ -32,22 +32,14 @@
 // ISO 8601 timestamp: YYYY-MM-DDTHH:MM:SSZ (20 characters)
 #define MAX_TIMESTAMP_LENGTH 20
 
-// Maximum size of POST data (4KB is often reasonable)
+// Maximum size of POST data (4KB seems reasonable)
 #define MAX_POST_DATA_SIZE 4096
-
-// Use PATH_MAX if available, otherwise fall back to 1024
-#ifndef PATH_MAX
-#define MAX_PATH_LENGTH 1024
-#else
-#define MAX_PATH_LENGTH PATH_MAX
-#endif
 
 // Specific buffer sizes, adjust as needed based on expected data
 #define MAX_APP_VERSION_LENGTH 100
 #define MAX_OS_RELEASE_LENGTH 100
 #define MAX_CPU_ARCH_LENGTH 50
 
-// Macro guard for timing code
 #ifdef ZUSAGE_TIMING
 #define START_TIMER clock_t start_time = clock();
 #define END_TIMER(label) \
@@ -58,7 +50,6 @@
 #define END_TIMER(label)
 #endif
 
-// Function to print debug messages based on the environment variable
 void print_debug(const char *format, ...) {
   if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
     va_list args;
