@@ -12,6 +12,40 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
+#include <limits.h> // For PATH_MAX and HOST_NAME_MAX
+
+// --- Macro Definitions ---
+
+// Consider making this configurable via environment variable in production
+#define USAGE_ANALYTICS_URL "http://rogi21.fyre.ibm.com:3000/usage"
+#define VERSION_FILE_RELATIVE_PATH "/../.version"
+
+// Use HOST_NAME_MAX from <limits.h>
+#define MAX_HOSTNAME_LENGTH HOST_NAME_MAX
+
+// IPv4 address length (use INET_ADDRSTRLEN)
+#define MAX_IP_ADDRESS_LENGTH INET_ADDRSTRLEN
+
+// IPv6 address length (if needed, otherwise remove)
+// #define MAX_IPV6_ADDRESS_LENGTH INET6_ADDRSTRLEN
+
+// ISO 8601 timestamp: YYYY-MM-DDTHH:MM:SSZ (20 characters)
+#define MAX_TIMESTAMP_LENGTH 20
+
+// Maximum size of POST data (4KB is often reasonable)
+#define MAX_POST_DATA_SIZE 4096
+
+// Use PATH_MAX if available, otherwise fall back to 1024
+#ifndef PATH_MAX
+#define MAX_PATH_LENGTH 1024
+#else
+#define MAX_PATH_LENGTH PATH_MAX
+#endif
+
+// Specific buffer sizes, adjust as needed based on expected data
+#define MAX_APP_VERSION_LENGTH 100
+#define MAX_OS_RELEASE_LENGTH 100
+#define MAX_CPU_ARCH_LENGTH 50
 
 // Macro guard for timing code
 #ifdef ZUSAGE_TIMING
@@ -58,7 +92,7 @@ void get_fqdn(char *fqdn, size_t size) {
     return; // Avoid invalid input
   }
 
-  char hostname[256];
+  char hostname[MAX_HOSTNAME_LENGTH];
   struct addrinfo hints, *res = NULL;
   int ret;
 
@@ -144,7 +178,7 @@ void get_local_ip(char *local_ip, size_t size) {
 }
 
 char *get_app_version() {
-  char *app_version = malloc(256);
+  char *app_version = malloc(MAX_APP_VERSION_LENGTH);
   if (!app_version) {
     print_debug("get_app_version: Memory allocation failed.");
     return strdup("unknown");
@@ -152,32 +186,32 @@ char *get_app_version() {
 
   char *program_dir = __getprogramdir();
   if (!program_dir) {
-    strncpy(app_version, "unknown", 255);
-    app_version[255] = '\0';
+    strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
+    app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
     print_debug("get_app_version: Failed to get program directory, using 'unknown'");
     return app_version;
   }
 
-  char version_file_path[1024];
-  snprintf(version_file_path, sizeof(version_file_path), "%s/../.version", program_dir);
+  char version_file_path[MAX_PATH_LENGTH];
+  snprintf(version_file_path, sizeof(version_file_path), "%s%s", program_dir, VERSION_FILE_RELATIVE_PATH);
 
   FILE *version_file = fopen(version_file_path, "r");
   if (version_file) {
-    if (fgets(app_version, 256, version_file)) {
+    if (fgets(app_version, MAX_APP_VERSION_LENGTH, version_file)) {
       size_t len = strlen(app_version);
       if (len > 0 && app_version[len - 1] == '\n') {
         app_version[len - 1] = '\0'; // Remove trailing newline
       }
       print_debug("get_app_version: Resolved app version: %s", app_version);
     } else {
-      strncpy(app_version, "unknown", 255);
-      app_version[255] = '\0';
+      strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
+      app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
       print_debug("get_app_version: Failed to read version file, using 'unknown'");
     }
     fclose(version_file);
   } else {
-    strncpy(app_version, "unknown", 255);
-    app_version[255] = '\0';
+    strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
+    app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
     print_debug("get_app_version: Failed to open version file, using 'unknown'");
   }
 
@@ -193,7 +227,7 @@ void *send_usage_data_thread(void *arg) {
   START_TIMER;
 
   END_TIMER("1. Initial setup");
-  char fqdn[256];
+  char fqdn[MAX_HOSTNAME_LENGTH];
   get_fqdn(fqdn, sizeof(fqdn));
 
   END_TIMER("2. After get_fqdn");
@@ -209,7 +243,7 @@ void *send_usage_data_thread(void *arg) {
     const char *app_name = getprogname();
     END_TIMER("3. After getprogname");
 
-    char local_ip[INET_ADDRSTRLEN];
+    char local_ip[MAX_IP_ADDRESS_LENGTH];
     get_local_ip(local_ip, sizeof(local_ip));
     END_TIMER("4. After get_local_ip");
 
@@ -222,13 +256,13 @@ void *send_usage_data_thread(void *arg) {
 
     time_t now = time(NULL);
     struct tm *timeinfo = gmtime(&now);
-    char timestamp[25];
+    char timestamp[MAX_TIMESTAMP_LENGTH];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
     END_TIMER("6. After timestamp");
 
-    char *url = "http://rogi21.fyre.ibm.com:3000/usage";
+    char *url = USAGE_ANALYTICS_URL;
 
-    char post_data[4096];
+    char post_data[MAX_POST_DATA_SIZE];
     snprintf(post_data, sizeof(post_data),
              "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
              app_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp);
