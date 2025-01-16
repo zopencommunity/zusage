@@ -1,3 +1,3 @@
-# zedc_ascii
+# zusage
 
-This is thin wrapper library for libzz (zedc library) designed to be compatible for ascii based applications.
+A library for collecting usage statistics for zopen tools
