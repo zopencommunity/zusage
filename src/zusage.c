@@ -56,7 +56,7 @@
 
 
 void print_debug(const char *format, ...) {
-  if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
+  if (__getenv("ZUSAGE_DEBUG") && strcmp(__getenv("ZUSAGE_DEBUG"), "1") == 0) {
     va_list args;
     va_start(args, format);
     fprintf(stderr, "DEBUG: ");
@@ -174,44 +174,53 @@ void get_local_ip(char *local_ip, size_t size) {
 }
 
 char *get_app_version() {
-  char *app_version = malloc(MAX_APP_VERSION_LENGTH);
-  if (!app_version) {
-    print_debug("get_app_version: Memory allocation failed.");
-    return strdup("unknown");
-  }
-
-  char *program_dir = __getprogramdir();
-  if (!program_dir) {
-    strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
-    app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
-    print_debug("get_app_version: Failed to get program directory, using 'unknown'");
-    return app_version;
-  }
-
-  char version_file_path[PATH_MAX];
-  snprintf(version_file_path, sizeof(version_file_path), "%s%s", program_dir, VERSION_FILE_RELATIVE_PATH);
-
-  FILE *version_file = fopen(version_file_path, "r");
-  if (version_file) {
-    if (fgets(app_version, MAX_APP_VERSION_LENGTH, version_file)) {
-      size_t len = strlen(app_version);
-      if (len > 0 && app_version[len - 1] == '\n') {
-        app_version[len - 1] = '\0'; // Remove trailing newline
-      }
-      print_debug("get_app_version: Resolved app version: %s", app_version);
-    } else {
-      strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
-      app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
-      print_debug("get_app_version: Failed to read version file, using 'unknown'");
+    char *app_version = malloc(MAX_APP_VERSION_LENGTH);
+    if (!app_version) {
+        print_debug("get_app_version: Memory allocation failed.");
+        return strdup("unknown"); 
     }
-    fclose(version_file);
-  } else {
-    strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
-    app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
-    print_debug("get_app_version: Failed to open version file, using 'unknown'");
-  }
 
-  return app_version;
+    char *program_dir = __getprogramdir();
+    if (!program_dir) {
+        print_debug("get_app_version: Failed to get program directory, using 'unknown'");
+        strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
+        app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
+        return app_version; 
+    }
+
+    char version_file_path[1024];
+    int snprintf_result = snprintf(version_file_path, sizeof(version_file_path), "%s%s", program_dir, VERSION_FILE_RELATIVE_PATH);
+    print_debug("get_app_version: version_file_path: %sn", version_file_path);
+
+    // Check for snprintf errors
+    if (snprintf_result < 0 || snprintf_result >= sizeof(version_file_path)) {
+        print_debug("get_app_version: snprintf failed or truncated the path, using 'unknown'");
+        strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
+        app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
+        return app_version;
+    }
+
+    FILE *version_file = fopen(version_file_path, "r");
+    if (version_file) {
+        if (fgets(app_version, MAX_APP_VERSION_LENGTH, version_file)) {
+            size_t len = strlen(app_version);
+            if (len > 0 && app_version[len - 1] == '\n') {
+                app_version[len - 1] = '\0'; 
+            }
+            print_debug("get_app_version: Resolved app version: %s", app_version);
+        } else {
+            print_debug("get_app_version: Failed to read version file, using 'unknown'");
+            strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
+            app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
+        }
+        fclose(version_file);
+    } else {
+        print_debug("get_app_version: Failed to open version file, using 'unknown'");
+        strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
+        app_version[MAX_APP_VERSION_LENGTH - 1] = '\0';
+    }
+
+    return app_version;
 }
 
 #if 0 /* Deprecated curl code */
