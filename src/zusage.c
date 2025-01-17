@@ -3,31 +3,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <curl/curl.h>
 #include <time.h>
-#include <netdb.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
-#include <limits.h> // For PATH_MAX and HOST_NAME_MAX
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <limits.h>
+#include <stdarg.h>
+
 
 // --- Macro Definitions ---
 
-// Consider making this configurable via environment variable in production
 #define USAGE_ANALYTICS_URL "http://rogi21.fyre.ibm.com:3000/usage"
 #define VERSION_FILE_RELATIVE_PATH "/../.version"
 
-// Use HOST_NAME_MAX from <limits.h>
-#define MAX_HOSTNAME_LENGTH HOST_NAME_MAX
+#define MAX_HOSTNAME_LENGTH _POSIX_HOST_NAME_MAX
 
-// IPv4 address length (use INET_ADDRSTRLEN)
 #define MAX_IP_ADDRESS_LENGTH INET_ADDRSTRLEN
-
-// IPv6 address length (if needed, otherwise remove)
-// #define MAX_IPV6_ADDRESS_LENGTH INET6_ADDRSTRLEN
 
 // ISO 8601 timestamp: YYYY-MM-DDTHH:MM:SSZ (20 characters)
 #define MAX_TIMESTAMP_LENGTH 20
@@ -35,10 +33,9 @@
 // Maximum size of POST data (4KB seems reasonable)
 #define MAX_POST_DATA_SIZE 4096
 
-// Specific buffer sizes, adjust as needed based on expected data
 #define MAX_APP_VERSION_LENGTH 100
-#define MAX_OS_RELEASE_LENGTH 100
-#define MAX_CPU_ARCH_LENGTH 50
+#define MAX_OS_RELEASE_LENGTH 32
+#define MAX_CPU_ARCH_LENGTH 16
 
 #ifdef ZUSAGE_TIMING
 #define START_TIMER clock_t start_time = clock();
@@ -49,6 +46,14 @@
 #define START_TIMER
 #define END_TIMER(label)
 #endif
+
+// Error handling macro (replace with your preferred method)
+#define CHECK_ERROR(result, message) \
+    if (result < 0) { \
+        perror(message); \
+        exit(EXIT_FAILURE); \
+    }
+
 
 void print_debug(const char *format, ...) {
   if (getenv("ZUSAGE_DEBUG") && strcmp(getenv("ZUSAGE_DEBUG"), "1") == 0) {
@@ -183,7 +188,7 @@ char *get_app_version() {
     return app_version;
   }
 
-  char version_file_path[MAX_PATH_LENGTH];
+  char version_file_path[PATH_MAX];
   snprintf(version_file_path, sizeof(version_file_path), "%s%s", program_dir, VERSION_FILE_RELATIVE_PATH);
 
   FILE *version_file = fopen(version_file_path, "r");
@@ -209,6 +214,7 @@ char *get_app_version() {
   return app_version;
 }
 
+#if 0 /* Deprecated curl code */
 void *send_usage_data_thread(void *arg) {
   CURL *easy_handle;
   double duration;
@@ -291,6 +297,110 @@ void *send_usage_data_thread(void *arg) {
   curl_global_cleanup();
   return NULL;
 }
+#endif
+
+void *send_usage_data_thread() {
+    double duration;
+
+    START_TIMER;
+
+    END_TIMER("1. Initial setup");
+
+    char fqdn[MAX_HOSTNAME_LENGTH];
+    get_fqdn(fqdn, sizeof(fqdn));
+
+    END_TIMER("2. After get_fqdn");
+
+    if (!is_ibm_domain(fqdn)) {
+        fprintf(stderr, "Skipping usage collection for non-IBM domain: %s\n", fqdn);
+        return NULL;
+    }
+
+    const char *app_name = getprogname();
+    END_TIMER("3. After getprogname");
+
+    char local_ip[MAX_IP_ADDRESS_LENGTH];
+    get_local_ip(local_ip, sizeof(local_ip));
+    END_TIMER("4. After get_local_ip");
+
+    char *os_release = NULL;
+    char *cpu_arch = NULL;
+    get_system_info(&os_release, &cpu_arch);
+    END_TIMER("5. After get_system_info");
+
+    char *app_version = get_app_version();
+
+    time_t now = time(NULL);
+    struct tm *timeinfo = gmtime(&now);
+    char timestamp[MAX_TIMESTAMP_LENGTH];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
+    END_TIMER("6. After timestamp");
+
+    const char *hostname = "rogi21.fyre.ibm.com"; // Extract from USAGE_ANALYTICS_URL
+    const int port = 3000;
+    const char *path = "/usage";
+
+    // 1. Resolve hostname
+    struct hostent *server = gethostbyname(hostname);
+    if (server == NULL) {
+        fprintf(stderr, "ERROR, no such host\n");
+        return NULL;
+    }
+
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK_ERROR(sockfd, "ERROR opening socket");
+
+    struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
+
+    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("ERROR connecting");
+        close(sockfd);
+        return NULL;
+    }
+
+    char post_data[MAX_POST_DATA_SIZE];
+    snprintf(post_data, sizeof(post_data),
+             "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
+             app_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp);
+
+    char request[MAX_POST_DATA_SIZE * 2]; 
+    snprintf(request, sizeof(request),
+             "POST %s HTTP/1.1\r\n"
+             "Host: %s\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %ld\r\n"
+             "Connection: close\r\n"
+             "\r\n"
+             "%s",
+             path, hostname, strlen(post_data), post_data);
+
+    ssize_t bytes_sent = send(sockfd, request, strlen(request), 0);
+    CHECK_ERROR(bytes_sent, "ERROR writing to socket");
+
+#if 0
+    char buffer[256];
+    ssize_t bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_received > 0) {
+        buffer[bytes_received] = '\0';
+        print_debug("Server response:\n%s", buffer);
+    } else if (bytes_received < 0) {
+        perror("ERROR reading from socket");
+    }
+#endif
+
+    close(sockfd);
+    END_TIMER("8. After sending and receiving data");
+
+    free(os_release);
+    free(cpu_arch);
+    free(app_version);
+
+    return NULL;
+}
 
 __attribute__((constructor))
 void usage_analytics_init() {
@@ -298,7 +408,7 @@ void usage_analytics_init() {
   if (pthread_create(&thread_id, NULL, send_usage_data_thread, NULL) != 0) {
     fprintf(stderr, "Failed to create thread for usage analytics\n");
   } else {
-    pthread_detach(thread_id); // Ensure resources are cleaned up when thread exits
+    pthread_detach(thread_id);
   }
 }
 
