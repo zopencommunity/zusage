@@ -21,8 +21,10 @@
 
 // --- Macro Definitions ---
 
-#define USAGE_ANALYTICS_URL "http://rogi21.fyre.ibm.com:3000/usage"
-#define VERSION_FILE_RELATIVE_PATH "/../.version"
+#define USAGE_ANALYTICS_URL "rogi21.fyre.ibm.com"
+#define USAGE_ANALYTICS_PATH "/usage"
+#define USAGE_ANALYTICS_PORT 3000
+#define VERSION_FILE_RELATIVE_PATH "/../.version" // Assuming zopen / OEF structure
 
 #define MAX_HOSTNAME_LENGTH _POSIX_HOST_NAME_MAX
 
@@ -57,7 +59,7 @@
 
 
 void print_debug(const char *format, ...) {
-  if (__getenv("ZUSAGE_DEBUG") && strcmp(__getenv("ZUSAGE_DEBUG"), "1") == 0) {
+  if (getenv("ZUSAGE_DEBUG")) {
     va_list args;
     va_start(args, format);
     fprintf(stderr, "DEBUG: ");
@@ -344,9 +346,9 @@ void *send_usage_data_thread() {
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
     END_TIMER("6. After timestamp");
 
-    const char *hostname = "rogi21.fyre.ibm.com"; // Extract from USAGE_ANALYTICS_URL
-    const int port = 3000;
-    const char *path = "/usage";
+    const char *hostname = USAGE_ANALYTICS_URL; // Extract from USAGE_ANALYTICS_URL
+    const int port = USAGE_ANALYTICS_PORT;
+    const char *path = USAGE_ANALYTICS_PATH;
 
     // 1. Resolve hostname
     struct hostent *server = gethostbyname(hostname);
@@ -389,7 +391,7 @@ void *send_usage_data_thread() {
     ssize_t bytes_sent = send(sockfd, request, strlen(request), 0);
     CHECK_ERROR(bytes_sent, "ERROR writing to socket");
 
-#if 0
+#if 0 /* To optimize, ignore the response */
     char buffer[256];
     ssize_t bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received > 0) {
