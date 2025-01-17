@@ -16,6 +16,7 @@
 #include <netdb.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <_Nascii.h>
 
 
 // --- Macro Definitions ---
@@ -188,11 +189,9 @@ char *get_app_version() {
         return app_version; 
     }
 
-    char version_file_path[1024];
+    char version_file_path[PATH_MAX];
     int snprintf_result = snprintf(version_file_path, sizeof(version_file_path), "%s%s", program_dir, VERSION_FILE_RELATIVE_PATH);
-    print_debug("get_app_version: version_file_path: %sn", version_file_path);
 
-    // Check for snprintf errors
     if (snprintf_result < 0 || snprintf_result >= sizeof(version_file_path)) {
         print_debug("get_app_version: snprintf failed or truncated the path, using 'unknown'");
         strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
@@ -413,6 +412,11 @@ void *send_usage_data_thread() {
 
 __attribute__((constructor))
 void usage_analytics_init() {
+  int cvstate = __ae_autoconvert_state(_CVTSTATE_QUERY);
+  if (_CVTSTATE_OFF == cvstate) {
+    __ae_autoconvert_state(_CVTSTATE_ON);
+  } 
+
   pthread_t thread_id;
   if (pthread_create(&thread_id, NULL, send_usage_data_thread, NULL) != 0) {
     fprintf(stderr, "Failed to create thread for usage analytics\n");
