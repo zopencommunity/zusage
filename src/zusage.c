@@ -53,8 +53,7 @@
 // Error handling macro (replace with your preferred method)
 #define CHECK_ERROR(result, message) \
     if (result < 0) { \
-        perror(message); \
-        exit(EXIT_FAILURE); \
+      print_debug(message); \
     }
 
 
@@ -191,6 +190,7 @@ char *get_app_version() {
         return app_version; 
     }
 
+    print_debug("get_app_version: program_dir: %s", program_dir);
     char version_file_path[PATH_MAX];
     int snprintf_result = snprintf(version_file_path, sizeof(version_file_path), "%s%s", program_dir, VERSION_FILE_RELATIVE_PATH);
 
@@ -346,14 +346,14 @@ void *send_usage_data_thread() {
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
     END_TIMER("6. After timestamp");
 
-    const char *hostname = USAGE_ANALYTICS_URL; // Extract from USAGE_ANALYTICS_URL
+    const char *hostname = USAGE_ANALYTICS_URL;
     const int port = USAGE_ANALYTICS_PORT;
     const char *path = USAGE_ANALYTICS_PATH;
 
     // 1. Resolve hostname
     struct hostent *server = gethostbyname(hostname);
     if (server == NULL) {
-        fprintf(stderr, "ERROR, no such host\n");
+        print_debug("ERROR, no such host");
         return NULL;
     }
 
@@ -367,7 +367,7 @@ void *send_usage_data_thread() {
     memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
 
     if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("ERROR connecting");
+        print_debug("ERROR connecting");
         close(sockfd);
         return NULL;
     }
@@ -389,9 +389,9 @@ void *send_usage_data_thread() {
              path, hostname, strlen(post_data), post_data);
 
     ssize_t bytes_sent = send(sockfd, request, strlen(request), 0);
-    CHECK_ERROR(bytes_sent, "ERROR writing to socket");
 
 #if 0 /* To optimize, ignore the response */
+    CHECK_ERROR(bytes_sent, "ERROR writing to socket");
     char buffer[256];
     ssize_t bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received > 0) {
