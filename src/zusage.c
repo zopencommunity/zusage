@@ -309,6 +309,73 @@ void *send_usage_data_thread(void *arg) {
 }
 #endif
 
+int is_ibm_internal_ip(const char *ip_address) {
+    if (!ip_address) {
+        print_debug("is_ibm_internal_ip: Null IP address provided.");
+        return 0;
+    }
+
+    struct in_addr addr;
+    if (inet_pton(AF_INET, ip_address, &addr) != 1) {
+        print_debug("is_ibm_internal_ip: Invalid IP address format: %s", ip_address);
+        return 0;
+    }
+
+    uint32_t ip = ntohl(addr.s_addr);
+
+    // Check 9.x.x.x range
+    if ((ip >> 24) == 9) {
+        return 1;
+    }
+
+    // Check 129.42.x.x range
+    if ((ip >> 16) == (129 << 8 | 42)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+
+int is_ibm_domain_or_internal_ip(const char *hostname) {
+    if (!hostname) {
+        print_debug("is_ibm_domain_or_internal_ip: Null hostname provided.");
+        return 0;
+    }
+
+    if (strstr(hostname, "ibm.com") != NULL) {
+        return 1; // It's an IBM domain
+    }
+
+    struct addrinfo hints, *res, *rp;
+    int sfd, s;
+
+    memset(&hints, 0, sizeof(struct addrinfo));
+    hints.ai_family = AF_INET; // We only care about IPv4 for this check
+    hints.ai_socktype = SOCK_STREAM;
+
+    s = getaddrinfo(hostname, NULL, &hints, &res);
+    if (s != 0) {
+        print_debug("getaddrinfo: %s", gai_strerror(s));
+        return 0;
+    }
+
+    for (rp = res; rp != NULL; rp = rp->ai_next) {
+        if (rp->ai_family == AF_INET) {
+            char ip_address[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &((struct sockaddr_in *)rp->ai_addr)->sin_addr, ip_address, INET_ADDRSTRLEN);
+            print_debug("Resolved IP for %s: %s", hostname, ip_address);
+            if (is_ibm_internal_ip(ip_address)) {
+                freeaddrinfo(res);
+                return 1;
+            }
+        }
+    }
+
+    freeaddrinfo(res);
+    return 0;
+}
+
 void *send_usage_data_thread() {
     double duration;
 
@@ -321,8 +388,11 @@ void *send_usage_data_thread() {
 
     END_TIMER("2. After get_fqdn");
 
-    if (!is_ibm_domain(fqdn)) {
-        fprintf(stderr, "Skipping usage collection for non-IBM domain: %s\n", fqdn);
+    if (!is_ibm_domain_or_internal_ip(fqdn)) { 
+        fprintf(stderr, "Skipping usage collection for non-IBM domain or non-internal IP: %s\n", fqdn);
+        free(os_release);
+        free(cpu_arch);
+        free(app_version);
         return NULL;
     }
 
