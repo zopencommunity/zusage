@@ -309,71 +309,39 @@ void *send_usage_data_thread(void *arg) {
 }
 #endif
 
-int is_ibm_internal_ip(const char *ip_address) {
-    if (!ip_address) {
-        print_debug("is_ibm_internal_ip: Null IP address provided.");
-        return 0;
-    }
 
-    struct in_addr addr;
-    if (inet_pton(AF_INET, ip_address, &addr) != 1) {
-        print_debug("is_ibm_internal_ip: Invalid IP address format: %s", ip_address);
-        return 0;
-    }
-
-    uint32_t ip = ntohl(addr.s_addr);
-
-    // Check 9.x.x.x range
+int is_ibm_internal_ip(struct sockaddr_in *addr) {
+    uint32_t ip = ntohl(addr->sin_addr.s_addr);
+    
     if ((ip >> 24) == 9) {
         return 1;
     }
-
-    // Check 129.42.x.x range
-    if ((ip >> 16) == (129 << 8 | 42)) {
-        return 1;
-    }
-
     return 0;
 }
 
-
-int is_ibm_domain_or_internal_ip(const char *hostname) {
-    if (!hostname) {
-        print_debug("is_ibm_domain_or_internal_ip: Null hostname provided.");
-        return 0;
-    }
-
-    if (strstr(hostname, "ibm.com") != NULL) {
-        return 1; // It's an IBM domain
-    }
-
-    struct addrinfo hints, *res, *rp;
-    int sfd, s;
-
-    memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_family = AF_INET; // We only care about IPv4 for this check
+int resolve_and_check_ibm() {
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    s = getaddrinfo(hostname, NULL, &hints, &res);
-    if (s != 0) {
-        print_debug("getaddrinfo: %s", gai_strerror(s));
+    if (getaddrinfo(USAGE_ANALYTICS_URL, NULL, &hints, &res) != 0) {
+        perror("getaddrinfo failed");
         return 0;
     }
 
-    for (rp = res; rp != NULL; rp = rp->ai_next) {
-        if (rp->ai_family == AF_INET) {
-            char ip_address[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &((struct sockaddr_in *)rp->ai_addr)->sin_addr, ip_address, INET_ADDRSTRLEN);
-            print_debug("Resolved IP for %s: %s", hostname, ip_address);
-            if (is_ibm_internal_ip(ip_address)) {
-                freeaddrinfo(res);
-                return 1;
+    int is_internal = 0;
+    for (struct addrinfo *p = res; p != NULL; p = p->ai_next) {
+        if (p->ai_family == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)p->ai_addr;
+            if (is_ibm_internal_ip(addr)) {
+                is_internal = 1;
+                break;
             }
         }
     }
-
     freeaddrinfo(res);
-    return 0;
+    return is_internal;
 }
 
 void *send_usage_data_thread() {
@@ -388,11 +356,8 @@ void *send_usage_data_thread() {
 
     END_TIMER("2. After get_fqdn");
 
-    if (!is_ibm_domain_or_internal_ip(fqdn)) { 
-        fprintf(stderr, "Skipping usage collection for non-IBM domain or non-internal IP: %s\n", fqdn);
-        free(os_release);
-        free(cpu_arch);
-        free(app_version);
+    if (!is_ibm_domain(fqdn) || !resolve_and_check_ibm()) { 
+        print_debug("Skipping usage collection for non-IBM domain or non-internal IP: %s\n", fqdn);
         return NULL;
     }
 
@@ -491,7 +456,7 @@ void usage_analytics_init() {
 
   pthread_t thread_id;
   if (pthread_create(&thread_id, NULL, send_usage_data_thread, NULL) != 0) {
-    fprintf(stderr, "Failed to create thread for usage analytics\n");
+    print_debug("Failed to create thread for usage analytics\n");
   } else {
     pthread_detach(thread_id);
   }
