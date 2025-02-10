@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <libgen.h>
+#include <sys/ps.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/utsname.h>
@@ -11,6 +13,7 @@
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -25,6 +28,7 @@
 #define USAGE_ANALYTICS_PATH "/usage"
 #define USAGE_ANALYTICS_PORT 3000
 #define VERSION_FILE_RELATIVE_PATH "/../.version" // Assuming zopen / OEF structure
+#define PATH_MAX 1024
 
 #define MAX_HOSTNAME_LENGTH _POSIX_HOST_NAME_MAX
 
@@ -175,6 +179,55 @@ void get_local_ip(char *local_ip, size_t size) {
   close(sock);
 }
 
+char* __tool_getprogramdir() {
+  char argv[PATH_MAX];
+  W_PSPROC buf;
+  int token = 0;
+  pid_t mypid = getpid();
+
+  memset(&buf, 0, sizeof(buf));
+  buf.ps_pathlen = PATH_MAX;
+  buf.ps_pathptr = &argv[0];
+
+  while ((token = w_getpsent(token, &buf, sizeof(buf))) > 0) {
+    if (buf.ps_pid == mypid) {
+      // Resolve path to find the true location of the executable.
+      char* parent = realpath(argv, NULL); 
+
+      if (parent == NULL) {
+        // handle error or return an appropriate value
+        return NULL;
+      }
+
+      // Get the parent directory.
+      dirname(parent);
+      return parent;
+    }
+  }
+
+  return NULL;
+}
+
+char* __tool_getprogname() {
+  char argv[PATH_MAX];
+  W_PSPROC buf;
+  int token = 0;
+  pid_t mypid = getpid();
+
+  memset(&buf, 0, sizeof(buf));
+  buf.ps_pathlen = PATH_MAX;
+  buf.ps_pathptr = &argv[0];
+
+  while ((token = w_getpsent(token, &buf, sizeof(buf))) > 0) {
+    if (buf.ps_pid == mypid) {
+      // return the basename of the found executable
+      return strdup(basename(buf.ps_pathptr));
+    }
+  }
+
+  return NULL;
+}
+
 char *get_app_version() {
     char *app_version = malloc(MAX_APP_VERSION_LENGTH);
     if (!app_version) {
@@ -182,7 +235,7 @@ char *get_app_version() {
         return strdup("unknown"); 
     }
 
-    char *program_dir = __getprogramdir();
+    char *program_dir = __tool_getprogramdir();
     if (!program_dir) {
         print_debug("get_app_version: Failed to get program directory, using 'unknown'");
         strncpy(app_version, "unknown", MAX_APP_VERSION_LENGTH - 1);
@@ -326,7 +379,7 @@ int resolve_and_check_ibm() {
     hints.ai_socktype = SOCK_STREAM;
 
     if (getaddrinfo(USAGE_ANALYTICS_URL, NULL, &hints, &res) != 0) {
-        perror("getaddrinfo failed");
+        print_debug("getaddrinfo failed");
         return 0;
     }
 
@@ -361,7 +414,7 @@ void *send_usage_data_thread() {
         return NULL;
     }
 
-    const char *app_name = getprogname();
+    const char *app_name = __tool_getprogname();
     END_TIMER("3. After getprogname");
 
     char local_ip[MAX_IP_ADDRESS_LENGTH];
