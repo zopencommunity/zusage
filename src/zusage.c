@@ -1,4 +1,6 @@
 #include "usage_analytics.h"
+#include <fcntl.h>
+#include <signal.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,8 +63,19 @@
     }
 
 
+extern char **environ;
+
+void print_environ() {
+    printf("Priting environ\n");
+    char **env = environ;
+    while (*env) {
+        printf("%s\n", *env);
+        env++;
+    }
+}
+
 void print_debug(const char *format, ...) {
-  if (getenv("ZUSAGE_DEBUG")) {
+  if (__getenv("ZUSAGE_DEBUG")) {
     va_list args;
     va_start(args, format);
     fprintf(stderr, "DEBUG: ");
@@ -397,7 +410,7 @@ int resolve_and_check_ibm() {
     return is_internal;
 }
 
-void *send_usage_data_thread() {
+void *send_usage_data() {
     double duration;
 
     START_TIMER;
@@ -428,11 +441,13 @@ void *send_usage_data_thread() {
 
     char *app_version = get_app_version();
 
+    END_TIMER("6. After get_app_version");
+
     time_t now = time(NULL);
     struct tm *timeinfo = gmtime(&now);
     char timestamp[MAX_TIMESTAMP_LENGTH];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
-    END_TIMER("6. After timestamp");
+    END_TIMER("7. After timestamp");
 
     const char *hostname = USAGE_ANALYTICS_URL;
     const int port = USAGE_ANALYTICS_PORT;
@@ -459,6 +474,8 @@ void *send_usage_data_thread() {
         close(sockfd);
         return NULL;
     }
+
+    END_TIMER("8. After connect");
 
     char post_data[MAX_POST_DATA_SIZE];
     snprintf(post_data, sizeof(post_data),
@@ -491,7 +508,7 @@ void *send_usage_data_thread() {
 #endif
 
     close(sockfd);
-    END_TIMER("8. After sending and receiving data");
+    END_TIMER("9. After sending and receiving data");
 
     free(os_release);
     free(cpu_arch);
@@ -505,20 +522,52 @@ void usage_analytics_init() {
   int cvstate = __ae_autoconvert_state(_CVTSTATE_QUERY);
   if (_CVTSTATE_OFF == cvstate) {
     __ae_autoconvert_state(_CVTSTATE_ON);
-  } 
+  }
 
-  pthread_t thread_id;
-  if (pthread_create(&thread_id, NULL, send_usage_data_thread, NULL) != 0) {
-    print_debug("Failed to create thread for usage analytics\n");
-  } else {
-    pthread_detach(thread_id);
+  // --- Fork a child process ---
+  pid_t pid = fork();
+
+  if (pid == -1) {
+    print_debug("Failed to fork process for usage analytics\n");
+    return; // Exit if fork fails
+  }
+
+  if (pid == 0) { // Child process
+       // --- Redirect all standard file descriptors to /dev/null ---
+        int devnull = open("/dev/null", O_RDWR); // Open for reading AND writing
+        if (devnull == -1) {
+            perror("open /dev/null failed");
+            exit(EXIT_FAILURE);
+        }
+
+        if (dup2(devnull, STDIN_FILENO) == -1) {
+            perror("dup2(stdin) failed");
+            close(devnull); // Close devnull before exiting
+            exit(EXIT_FAILURE);
+        }
+        if (dup2(devnull, STDOUT_FILENO) == -1) {
+            perror("dup2(stdout) failed");
+            close(devnull); // Close devnull
+            exit(EXIT_FAILURE);
+        }
+        if (dup2(devnull, STDERR_FILENO) == -1) {
+            perror("dup2(stderr) failed");
+            close(devnull); // Close devnull
+            exit(EXIT_FAILURE);
+        }
+        close(devnull); // Close the original /dev/null descriptor
+    send_usage_data();
+    exit(EXIT_SUCCESS); // Child process MUST exit after its work
+  } else { // Parent process
+     signal(SIGCHLD, SIG_IGN);
+
+    // The parent can continue its work, or exit immediately, without blocking.
   }
 }
 
 #ifdef ZUSAGE_TEST_MAIN
-int main() {
-  // Main program logic
-  sleep(1);
+int main(int argc, char **argv) {
+  sleep(2);
   return 0;
 }
 #endif
