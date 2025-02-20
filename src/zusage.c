@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <errno.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <signal.h>
@@ -17,7 +18,7 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <_Nascii.h>
-#include <pwd.h> // Required for getpwuid and getuid
+#include <pwd.h>
 
 // --- Macro Definitions ---
 
@@ -25,7 +26,7 @@
 #define USAGE_ANALYTICS_PATH "/usage"
 #define USAGE_ANALYTICS_PORT 3000
 #define VERSION_FILE_RELATIVE_PATH "/../.version"
-#define PATH_MAX 1024
+#define PATH_MAX 1024*4
 
 #define MAX_HOSTNAME_LENGTH _POSIX_HOST_NAME_MAX
 #define MAX_IP_ADDRESS_LENGTH INET_ADDRSTRLEN
@@ -35,13 +36,35 @@
 #define MAX_OS_RELEASE_LENGTH 32
 #define MAX_CPU_ARCH_LENGTH 16
 #define MAX_DEBUG_BUFFER_SIZE 8192
-#define MAX_USERNAME_LENGTH 64 // Define max username length
+#define MAX_USERNAME_LENGTH 64 
+#define MAX_FQDN_LENGTH MAX_HOSTNAME_LENGTH // Assuming FQDN won't exceed hostname length
 
 // --- Environment Variables ---
 #define DISABLE_ENV_VAR "ZUSAGE_DISABLE"
 #define DEBUG_ENV_VAR "ZUSAGE_DEBUG"
 
+#define IBM_CHECK_CACHE_EXPIRY (14 * 24 * 3600) // 2 weeks in seconds
+#define IBM_CHECK_CACHE_FILE_NAME "zusage_check.cache"
+
 static int debug_fd = -1;
+
+// --- Hostname Cache ---
+static char cached_hostname[MAX_HOSTNAME_LENGTH] = "";
+static int hostname_cached = 0;
+
+// --- IBM Domain Check Cache ---
+static time_t last_ibm_check_time = 0;
+static int is_ibm_cached = -1; // -1: not checked, 0: not IBM, 1: IBM
+static char ibm_check_cache_path[PATH_MAX] = ""; // Path to cache file
+
+// --- FQDN Cache ---
+static char cached_fqdn[MAX_FQDN_LENGTH] = "";
+static int fqdn_cached = 0;
+
+// --- Username Cache ---
+static char cached_username_val[MAX_USERNAME_LENGTH] = "";
+static int username_cached = 0;
+
 
 char *generate_unique_filename() {
   static int sequence = 0;
@@ -135,6 +158,13 @@ int is_ibm_domain(const char *hostname) {
 }
 
 void get_fqdn(char *fqdn, size_t size) {
+    if (fqdn_cached) {
+        strncpy(fqdn, cached_fqdn, size - 1);
+        fqdn[size - 1] = '\0';
+        print_debug("get_fqdn: Using cached FQDN: %s", fqdn);
+        return;
+    }
+
   if (!fqdn || size == 0) {
     print_debug("get_fqdn: Invalid input");
     return;
@@ -166,7 +196,10 @@ void get_fqdn(char *fqdn, size_t size) {
   if (res != NULL && res->ai_canonname != NULL) {
     strncpy(fqdn, res->ai_canonname, size - 1);
     fqdn[size - 1] = '\0';
-    print_debug("get_fqdn: Resolved FQDN: %s", fqdn);
+    strncpy(cached_fqdn, fqdn, sizeof(cached_fqdn) - 1);
+    cached_fqdn[sizeof(cached_fqdn) - 1] = '\0';
+    fqdn_cached = 1;
+    print_debug("get_fqdn: Resolved and cached FQDN: %s", fqdn);
   } else {
     print_debug("get_fqdn: Could not resolve FQDN, using hostname");
     strncpy(fqdn, hostname, size - 1);
@@ -174,6 +207,25 @@ void get_fqdn(char *fqdn, size_t size) {
   }
   freeaddrinfo(res);
 }
+
+// Function to get hostname and cache it
+char* get_cached_hostname() {
+    if (hostname_cached) {
+        return cached_hostname;
+    }
+
+    if (gethostname(cached_hostname, sizeof(cached_hostname)) != 0) {
+        print_debug("get_cached_hostname: gethostname failed");
+        strncpy(cached_hostname, "unknown", sizeof(cached_hostname) - 1);
+        cached_hostname[sizeof(cached_hostname) - 1] = '\0';
+    } else {
+        cached_hostname[sizeof(cached_hostname) - 1] = '\0';
+        print_debug("get_cached_hostname: Hostname cached: %s", cached_hostname);
+        hostname_cached = 1;
+    }
+    return cached_hostname;
+}
+
 
 void get_system_info(char **os_release, char **cpu_arch) {
   if (!os_release || !cpu_arch) {
@@ -197,7 +249,7 @@ void get_system_info(char **os_release, char **cpu_arch) {
     if (*os_release) {
       free(*os_release);
       *os_release = strdup("unknown");
-    }
+      }
     if (*cpu_arch) {
       free(*cpu_arch);
       *cpu_arch = strdup("unknown");
@@ -384,7 +436,75 @@ int resolve_and_check_ibm() {
   return is_internal;
 }
 
+// Function to check if it's IBM domain and cache the result to file
+int check_and_cache_ibm_domain() {
+    time_t current_time = time(NULL);
+    if (current_time == (time_t)-1) {
+        print_debug("check_and_cache_ibm_domain: time() failed, cannot check cache expiry. Proceeding with check.");
+        //Proceed to check even if time fails, rather than skipping usage data.
+    } else if (is_ibm_cached != -1 && difftime(current_time, last_ibm_check_time) < IBM_CHECK_CACHE_EXPIRY) {
+        print_debug("check_and_cache_ibm_domain: Using in-memory cached IBM domain check result: %d", is_ibm_cached);
+        return is_ibm_cached; // Return cached result if not expired
+    }
+
+    // --- Check file cache ---
+    if (ibm_check_cache_path[0] != '\0') { // If cache path is initialized
+        FILE *cache_file = fopen(ibm_check_cache_path, "r");
+        if (cache_file) {
+            int cached_ibm_result;
+            time_t cached_timestamp;
+            if (fscanf(cache_file, "%d\n%ld", &cached_ibm_result, &cached_timestamp) == 2) {
+                if (current_time == (time_t)-1 || difftime(current_time, cached_timestamp) < IBM_CHECK_CACHE_EXPIRY) {
+                    fclose(cache_file);
+                    is_ibm_cached = cached_ibm_result; // Update in-memory cache as well
+                    print_debug("check_and_cache_ibm_domain: Using file cached IBM domain check result: %d", is_ibm_cached);
+                    last_ibm_check_time = current_time; // keep updating last_ibm_check_time for in-memory cache expiry
+                    return is_ibm_cached;
+                } else {
+                    print_debug("check_and_cache_ibm_domain: Cached IBM check result expired.");
+                }
+            } else {
+                print_debug("check_and_cache_ibm_domain: Could not read data from cache file, invalid format.");
+            }
+            fclose(cache_file);
+        } else {
+            print_debug("check_and_cache_ibm_domain: Failed to open cache file for reading: %s", ibm_check_cache_path);
+        }
+    }
+
+
+    char fqdn[MAX_HOSTNAME_LENGTH];
+    get_fqdn(fqdn, sizeof(fqdn));
+    int is_ibm = is_ibm_domain(fqdn) && resolve_and_check_ibm();
+
+    is_ibm_cached = is_ibm ? 1 : 0;
+    last_ibm_check_time = current_time;
+
+    // --- Update file cache ---
+    if (ibm_check_cache_path[0] != '\0') {
+        FILE *cache_file = fopen(ibm_check_cache_path, "w");
+        if (cache_file) {
+            fprintf(cache_file, "%d\n%ld\n", is_ibm_cached, (long)current_time);
+            fclose(cache_file);
+            print_debug("check_and_cache_ibm_domain: Updated IBM domain cache file to: %d", is_ibm_cached);
+        } else {
+            print_debug("check_and_cache_ibm_domain: Failed to open cache file for writing: %s", ibm_check_cache_path);
+        }
+    } else {
+        print_debug("check_and_cache_ibm_domain: Cache file path not initialized, cannot update cache file.");
+    }
+
+
+    print_debug("check_and_cache_ibm_domain: Updated IBM domain in-memory cache to: %d", is_ibm_cached);
+    return is_ibm_cached;
+}
+
+
 char* get_username() {
+    if (username_cached) {
+        return cached_username_val;
+    }
+
     char *username = malloc(MAX_USERNAME_LENGTH);
     if (!username) {
         print_debug("get_username: Memory allocation failed.");
@@ -397,7 +517,10 @@ char* get_username() {
     if (pwd != NULL) {
         strncpy(username, pwd->pw_name, MAX_USERNAME_LENGTH - 1);
         username[MAX_USERNAME_LENGTH - 1] = '\0';
-        print_debug("get_username: Resolved username: %s", username);
+        strncpy(cached_username_val, username, sizeof(cached_username_val) - 1);
+        cached_username_val[sizeof(cached_username_val) - 1] = '\0';
+        username_cached = 1;
+        print_debug("get_username: Resolved and cached username: %s", username);
     } else {
         print_debug("get_username: getpwuid failed.");
         strncpy(username, "unknown", MAX_USERNAME_LENGTH - 1);
@@ -407,8 +530,7 @@ char* get_username() {
 }
 
 
-// This function now takes the timestamp as an argument.
-void *send_usage_data(char *timestamp) {
+void *send_usage_data() {
   double duration;
 
   START_TIMER;
@@ -416,14 +538,10 @@ void *send_usage_data(char *timestamp) {
   END_TIMER("1. Initial setup");
 
   char fqdn[MAX_HOSTNAME_LENGTH];
-  get_fqdn(fqdn, sizeof(fqdn));
+  get_fqdn(fqdn, sizeof(fqdn)); // Will use cache if available
 
   END_TIMER("2. After get_fqdn");
 
-  if (!is_ibm_domain(fqdn) || !resolve_and_check_ibm()) {
-    print_debug("Skipping usage collection: Not IBM domain or internal IP.");
-    return NULL;
-  }
 
   char *app_name = __tool_getprogname();
   if (!app_name) {
@@ -464,7 +582,7 @@ void *send_usage_data(char *timestamp) {
 
   END_TIMER("6. After get_app_version");
 
-    char *username = get_username();
+    char *username = get_username(); // Will use cache if available
     if (!username) {
         print_debug("send_usage_data: username is NULL");
         username = strdup("unknown"); // Fallback to "unknown" username
@@ -623,19 +741,38 @@ void usage_analytics_init() {
     return;
   }
 
-  // --- Get the timestamp *before* forking ---
-  time_t now = time(NULL);
-  if (now == (time_t)-1) {
-      print_debug("usage_analytics_init: time() failed");
-      return; // Cannot get the time.
+  // --- Initialize cache file path ---
+  char *home_dir = getenv("HOME");
+  if (home_dir == NULL) {
+      print_debug("usage_analytics_init: HOME environment variable not set, cannot initialize cache file path. Using in-memory cache only.");
+  } else {
+      snprintf(ibm_check_cache_path, sizeof(ibm_check_cache_path), "%s/.cache/%s", home_dir, IBM_CHECK_CACHE_FILE_NAME);
+
+      // Create cache directory if it doesn't exist
+      char cache_dir[PATH_MAX];
+      strncpy(cache_dir, ibm_check_cache_path, sizeof(cache_dir) - 1);
+      cache_dir[sizeof(cache_dir) - 1] = '\0';
+      char *dir_path = dirname(cache_dir); // modifies cache_dir
+      struct stat st;
+      if (stat(dir_path, &st) != 0) {
+          if (mkdir(dir_path, 0700) == -1) {
+              print_debug("usage_analytics_init: Failed to create cache directory: %s, errno: %d", dir_path, errno);
+              ibm_check_cache_path[0] = '\0'; // Invalidate cache path
+          } else {
+              print_debug("usage_analytics_init: Created cache directory: %s", dir_path);
+          }
+      } else if (!S_ISDIR(st.st_mode)) {
+          print_debug("usage_analytics_init: Cache directory path exists but is not a directory: %s", dir_path);
+          ibm_check_cache_path[0] = '\0'; // Invalidate cache path
+      }
   }
-  struct tm *timeinfo = gmtime(&now);
-    if (timeinfo == NULL) {
-        print_debug("usage_analytics_init: gmtime() failed");
-        return; //Cannot get timeinfo
-    }
-  char timestamp[MAX_TIMESTAMP_LENGTH];
-  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
+
+
+  // --- Check and cache IBM domain status ---
+  if (!check_and_cache_ibm_domain()) {
+      print_debug("Skipping usage collection: Not IBM domain or internal IP (cached check).");
+      return; // Skip forking if not IBM domain after checking cache
+  }
 
   pid_t pid = fork();
 
@@ -668,7 +805,7 @@ void usage_analytics_init() {
     }
 
     close(devnull);
-    send_usage_data(timestamp);
+    send_usage_data();
     exit(EXIT_SUCCESS);
   } else {
     // Parent process
