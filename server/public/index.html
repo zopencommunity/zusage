@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Usage Data Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Usage Data Dashboard</h1>
+
+    <div class="chart-container">
+        <canvas id="usageOverTimeChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="appPopularityChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="osDistributionChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="cpuDistributionChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="hostnameUsageChart"></canvas>
+    </div>
+
+    <div id="raw-data-container">
+        <h2>Raw Usage Data (Debug)</h2>
+        <table id="usage-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>App Name</th>
+                    <th>FQDN</th>
+                    <th>Local IP</th>
+                    <th>OS Release</th>
+                    <th>CPU Arch</th>
+                    <th>App Version</th>
+                    <th>Timestamp</th>
+                    <th>Username</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
