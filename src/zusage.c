@@ -439,9 +439,6 @@ void *send_usage_data(char *timestamp) {
 
   END_TIMER("6. After get_app_version");
 
-  // Timestamp is now passed as an argument.
-  END_TIMER("7. After timestamp");
-
   const char *hostname = USAGE_ANALYTICS_URL;
   const int port = USAGE_ANALYTICS_PORT;
   const char *path = USAGE_ANALYTICS_PATH;
@@ -455,6 +452,7 @@ void *send_usage_data(char *timestamp) {
     free(app_name);
     return NULL;
   }
+  END_TIMER("7. After gethostbyname");
 
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0) {
@@ -472,6 +470,18 @@ void *send_usage_data(char *timestamp) {
   serv_addr.sin_port = htons(port);
   memcpy(&serv_addr.sin_addr.s_addr, server->h_addr_list[0], server->h_length);
 
+  struct timeval connect_timeout;
+  connect_timeout.tv_sec = 2;
+  connect_timeout.tv_usec = 0;
+  if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &connect_timeout, sizeof(connect_timeout)) < 0) {
+    print_debug("ERROR setting connect timeout");
+    close(sockfd);
+    free(os_release);
+    free(cpu_arch);
+    free(app_version);
+    free(app_name);
+  }
+
   if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
     print_debug("ERROR connecting to %s:%d", hostname, port);
     close(sockfd);
@@ -486,8 +496,8 @@ void *send_usage_data(char *timestamp) {
 
   char post_data[MAX_POST_DATA_SIZE];
   int post_data_len = snprintf(post_data, sizeof(post_data),
-           "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"timestamp\": \"%s\"}",
-           app_name, fqdn, local_ip, os_release, cpu_arch, app_version, timestamp); // Use the passed timestamp
+           "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\"}",
+           app_name, fqdn, local_ip, os_release, cpu_arch, app_version); 
 
   if (post_data_len < 0 || post_data_len >= sizeof(post_data)) {
     print_debug("send_usage_data: post data creation failed");
@@ -527,6 +537,7 @@ void *send_usage_data(char *timestamp) {
     print_debug("Incomplete data sent");
   }
 
+#if 0
   char buffer[256];
   ssize_t bytes_received;
   do {
@@ -541,6 +552,7 @@ void *send_usage_data(char *timestamp) {
   {
     print_debug("send_usage_data: recv failed");
   }
+#endif
 
   close(sockfd);
   END_TIMER("9. After sending and receiving data");
