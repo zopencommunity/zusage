@@ -1,8 +1,5 @@
-# Usage Analytics Dashboard
-
-**Important: IBM Internal Use Only**
-
-**This usage analytics solution is designed for internal use within the IBM domain and network environment only.**  It is not intended for external or production deployments outside of IBM's internal infrastructure.
+# Usage Analytics
+**Important: this usage analytics solution is designed for internal use within the IBM domain and network environment only.**  It is not intended for external or production deployments outside of IBM's internal infrastructure. If in doubt, set `export ZUSAGE_DISABLE=1`.
 
 ## Description
 
@@ -79,3 +76,9 @@ This project provides a simple usage analytics solution to track application usa
     *   Uses Chart.js library to render interactive charts (line, bar, pie).
     *   Displays a table of raw usage data.
     *   Styled with basic CSS.
+ 
+## Environment Variables
+
+*   **`ZUSAGE_DISABLE`:**  **To disable usage data collection entirely, set this environment variable to any value (e.g., `export ZUSAGE_DISABLE=true`). When this variable is set, the C client library will not collect or send any usage data.**
+*   **`ZUSAGE_DEBUG`:** If set to any value, enables debug logging in the C client library, writing detailed logs to `/tmp/zusagedebug-*.log`.
+
