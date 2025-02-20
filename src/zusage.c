@@ -17,6 +17,7 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <_Nascii.h>
+#include <pwd.h> // Required for getpwuid and getuid
 
 // --- Macro Definitions ---
 
@@ -34,6 +35,7 @@
 #define MAX_OS_RELEASE_LENGTH 32
 #define MAX_CPU_ARCH_LENGTH 16
 #define MAX_DEBUG_BUFFER_SIZE 8192
+#define MAX_USERNAME_LENGTH 64 // Define max username length
 
 // --- Environment Variables ---
 #define DISABLE_ENV_VAR "ZUSAGE_DISABLE"
@@ -382,6 +384,29 @@ int resolve_and_check_ibm() {
   return is_internal;
 }
 
+char* get_username() {
+    char *username = malloc(MAX_USERNAME_LENGTH);
+    if (!username) {
+        print_debug("get_username: Memory allocation failed.");
+        return strdup("unknown");
+    }
+
+    struct passwd *pwd;
+    uid_t uid = getuid();
+    pwd = getpwuid(uid);
+    if (pwd != NULL) {
+        strncpy(username, pwd->pw_name, MAX_USERNAME_LENGTH - 1);
+        username[MAX_USERNAME_LENGTH - 1] = '\0';
+        print_debug("get_username: Resolved username: %s", username);
+    } else {
+        print_debug("get_username: getpwuid failed.");
+        strncpy(username, "unknown", MAX_USERNAME_LENGTH - 1);
+        username[MAX_USERNAME_LENGTH - 1] = '\0';
+    }
+    return username;
+}
+
+
 // This function now takes the timestamp as an argument.
 void *send_usage_data(char *timestamp) {
   double duration;
@@ -439,6 +464,22 @@ void *send_usage_data(char *timestamp) {
 
   END_TIMER("6. After get_app_version");
 
+    char *username = get_username();
+    if (!username) {
+        print_debug("send_usage_data: username is NULL");
+        username = strdup("unknown"); // Fallback to "unknown" username
+        if (!username) {
+            print_debug("send_usage_data: memory alloc failed for username");
+            free(os_release);
+            free(cpu_arch);
+            free(app_version);
+            free(app_name);
+            return NULL;
+        }
+    }
+    END_TIMER("6.1. After get_username");
+
+
   const char *hostname = USAGE_ANALYTICS_URL;
   const int port = USAGE_ANALYTICS_PORT;
   const char *path = USAGE_ANALYTICS_PATH;
@@ -450,6 +491,7 @@ void *send_usage_data(char *timestamp) {
     free(cpu_arch);
     free(app_version);
     free(app_name);
+    free(username); // Free username as well
     return NULL;
   }
   END_TIMER("7. After gethostbyname");
@@ -461,6 +503,7 @@ void *send_usage_data(char *timestamp) {
     free(cpu_arch);
     free(app_version);
     free(app_name);
+    free(username); // Free username as well
     return NULL;
   }
 
@@ -480,6 +523,7 @@ void *send_usage_data(char *timestamp) {
     free(cpu_arch);
     free(app_version);
     free(app_name);
+    free(username); // Free username as well
   }
 
   if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
@@ -489,6 +533,7 @@ void *send_usage_data(char *timestamp) {
     free(cpu_arch);
     free(app_version);
     free(app_name);
+    free(username); // Free username as well
     return NULL;
   }
 
@@ -496,8 +541,8 @@ void *send_usage_data(char *timestamp) {
 
   char post_data[MAX_POST_DATA_SIZE];
   int post_data_len = snprintf(post_data, sizeof(post_data),
-           "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\"}",
-           app_name, fqdn, local_ip, os_release, cpu_arch, app_version); 
+           "{\"app_name\": \"%s\", \"fqdn\": \"%s\", \"local_ip\": \"%s\", \"os_release\": \"%s\", \"cpu_arch\": \"%s\", \"app_version\": \"%s\", \"username\": \"%s\"}",
+           app_name, fqdn, local_ip, os_release, cpu_arch, app_version, username);
 
   if (post_data_len < 0 || post_data_len >= sizeof(post_data)) {
     print_debug("send_usage_data: post data creation failed");
@@ -506,6 +551,7 @@ void *send_usage_data(char *timestamp) {
     free(cpu_arch);
     free(app_version);
     free(app_name);
+    free(username); // Free username as well
     return NULL;
   }
 
@@ -527,6 +573,7 @@ void *send_usage_data(char *timestamp) {
     free(cpu_arch);
     free(app_version);
     free(app_name);
+    free(username); // Free username as well
     return NULL;
   }
 
@@ -561,7 +608,7 @@ void *send_usage_data(char *timestamp) {
   free(cpu_arch);
   free(app_version);
   free(app_name);
-
+    free(username); // Free username
   return NULL;
 }
 
