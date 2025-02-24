@@ -22,7 +22,7 @@
 
 // --- Macro Definitions ---
 
-#define USAGE_ANALYTICS_URL "rogi21.fyre.ibm.com"
+#define USAGE_ANALYTICS_URL "zusage1.fyre.ibm.com"
 #define USAGE_ANALYTICS_PATH "/usage"
 #define USAGE_ANALYTICS_PORT 3000
 #define VERSION_FILE_RELATIVE_PATH "/../.version"
@@ -206,6 +206,11 @@ void get_fqdn(char *fqdn, size_t size) {
     fqdn[size-1] = '\0';
   }
   freeaddrinfo(res);
+
+  // Convert FQDN to lowercase
+  for (int i = 0; fqdn[i]; i++) {
+    fqdn[i] = tolower(fqdn[i]);
+  }
 }
 
 // Function to get hostname and cache it
@@ -809,7 +814,7 @@ void usage_analytics_init() {
     exit(EXIT_SUCCESS);
   } else {
     // Parent process
-    signal(SIGCHLD, SIG_IGN);
+   // signal(SIGCHLD, SIG_IGN);
   }
 }
 
