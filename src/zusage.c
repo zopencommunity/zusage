@@ -311,8 +311,12 @@ char* __tool_getprogramdir() {
 
   while ((token = w_getpsent(token, &buf, sizeof(buf))) > 0) {
     if (buf.ps_pid == mypid) {
-      char* parent = realpath(argv, NULL);
-
+      char* parent = (char*) malloc(PATH_MAX + 1);
+      if (parent == NULL) {
+        print_debug("__tool_getprogramdir: failed to resolve program directory");
+        return NULL;
+      }
+      parent = realpath(argv, parent);
       if (parent == NULL) {
         print_debug("__tool_getprogramdir: failed to resolve program directory");
         return NULL;
