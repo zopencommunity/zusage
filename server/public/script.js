@@ -132,10 +132,11 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             // OS Release Mapping (same as server-side)
             const osReleaseMap = {
+                "26.00": "v2r3",
                 "27.00": "v2r4",
                 "28.00": "v2r5",
                 "29.00": "v3r1",
-                "30":    "v3r2"
+                "30.00":  "v3r2"
             };
 
             const labels = data.map(item => osReleaseMap[item.os_release] || item.os_release);

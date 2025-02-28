@@ -149,6 +149,7 @@ app.get('/usage/raw', (req, res) => {
 
 // OS Release Mapping
 const osReleaseMap = {
+    "26.00": "v2r3",
     "27.00": "v2r4",
     "28.00": "v2r5",
     "29.00": "v3r1",
