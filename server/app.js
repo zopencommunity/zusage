@@ -1,12 +1,19 @@
+require('dotenv').config(); // Load environment variables from .env file
 const express = require('express');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const passport = require('passport'); // Import passport
+const OAuth2Strategy = require('passport-oauth2'); // Import OAuth2 strategy
+const session = require('express-session'); // Import express-session
+const https = require('https');
+const http = require('http');
 
 // Initialize the app and database
 const app = express();
+const httpApp = express(); // Separate Express app for HTTP /usage route
 const dbFilePath = path.join(__dirname, 'usage_data.db');
 const backupFilePath = `${dbFilePath}.bak`;
 const weeklyBackupDir = path.join(__dirname, 'weekly_backups');
@@ -18,9 +25,37 @@ if (!fs.existsSync(weeklyBackupDir)) {
 
 const db = new sqlite3.Database(dbFilePath);
 
+// --- HTTPS Configuration using self-signed certificate ---
+const privateKey = fs.readFileSync(path.join(__dirname, 'zusage1fyreibmcom.key'), 'utf8'); // Adjust path if needed
+const certificate = fs.readFileSync(path.join(__dirname, 'zusage1fyreibmcom.pem'), 'utf8'); // Adjust path if needed
+const credentials = {
+    key: privateKey,
+    cert: certificate
+};
+
 // Middleware
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from 'public' directory
+
+app.use(session({
+    secret: process.env.SESSION_SECRET, 
+    resave: false,
+    saveUninitialized: false,
+}));
+
+app.set('view engine', 'ejs'); // Set EJS as the view engine
+app.set('views', path.join(__dirname, 'public')); // Set views directory to 'public' (where index.html is)
+
+// --- Passport Setup ---
+app.use(passport.initialize());
+app.use(passport.session());
+
+app.use(bodyParser.json());
+httpApp.use(bodyParser.json()); // Need body-parser for the httpApp too
+
+app.use(express.static(path.join(__dirname, 'public')));
+httpApp.use(express.static(path.join(__dirname, 'public'))); // Serve static files for httpApp as well (though mainly for /usage)
+
 
 // Create or migrate the database schema
 db.serialize(() => {
@@ -38,6 +73,140 @@ db.serialize(() => {
         )
     `);
     console.log('Database schema initialized/verified.');
+});
+
+// --- OAuth 2.0 Strategy Configuration ---
+passport.use('github-ibm-oauth2', new OAuth2Strategy({ // Named strategy 'github-ibm-oauth2'
+        authorizationURL: process.env.OAUTH_AUTHORIZATION_URL, 
+        tokenURL: process.env.OAUTH_TOKEN_URL,            
+        clientID: process.env.OAUTH_CLIENT_ID,    
+        clientSecret: process.env.OAUTH_CLIENT_SECRET,
+        callbackURL: process.env.OAUTH_CALLBACK_URL,   
+        scope: 'user:email', // Example scope - adjust as needed for github.ibm.com
+        // If github.ibm.com OAuth needs user profile info from a different endpoint, configure userInfoURL and profile function:
+        // userInfoURL:  process.env.OAUTH_USER_INFO_URL, // e.g., 'https://api.github.ibm.com/user'
+        // profile: function(accessToken, done) {
+        //     // Function to extract user profile from userInfoURL response
+        //     // Example (adjust based on github.ibm.com's user info response format):
+        //     this._oauth2.get(this._userInfoURL, accessToken, function (err, body, res) {
+        //         if (err) { return done(err); }
+        //         try {
+        //             const json = JSON.parse(body);
+        //             const profile = {
+        //                 id: String(json.id), // Ensure ID is a string
+        //                 displayName: json.name,
+        //                 username: json.login,
+        //                 email: json.email // Or find email in json.emails array if needed
+        //                 // ... map other profile fields as needed ...
+        //             };
+        //             return done(null, profile);
+        //         } catch (e) {
+        //             return done(e);
+        //         }
+        //     });
+        //   },
+    },
+    function(accessToken, refreshToken, profile, done) {
+        // User authentication callback function
+        // In a simple setup, we can just pass the profile to `done`.
+        // In a real app, you'd typically:
+        // 1. Find or create a user in your database based on the profile.id (or profile.username).
+        // 2. If creating, store necessary profile info in your user database.
+        // 3. Call done(null, user) with the user object from your database (or the profile if you're not using a database for users in this example).
+
+        // For this simple example, we'll just use the profile as the user:
+        return done(null, profile);
+    }
+));
+
+// --- Passport Serialization and Deserialization ---
+passport.serializeUser(function(user, done) {
+    done(null, user); // For simplicity, serialize the entire user profile into the session
+});
+
+passport.deserializeUser(function(user, done) {
+    done(null, user); // Deserialize by just passing the user object back
+});
+
+
+// --- Authentication Routes ---
+app.get('/auth/github-ibm',
+    passport.authenticate('github-ibm-oauth2')); // Trigger OAuth flow
+
+app.get('/auth/github-ibm/callback',
+    passport.authenticate('github-ibm-oauth2', { failureRedirect: '/login' }), // Handle callback
+    function(req, res) {
+        // Successful authentication, redirect to dashboard.
+        res.redirect('/');
+    });
+
+app.get('/logout', function(req, res){
+    req.logout(function(err) { // Added callback function for req.logout as per Passport.js >= 0.6.0
+        if (err) { return next(err); }
+        res.redirect('/login'); // Redirect to login page after logout
+    });
+});
+
+app.get('/login', (req, res) => { // Simple login page
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+
+// --- Middleware to ensure user is authenticated ---
+function ensureAuthenticated(req, res, next) {
+    if (req.isAuthenticated()) { return next(); }
+    res.redirect('/login'); // Redirect to login page if not authenticated
+}
+
+// --- Protected Routes (apply ensureAuthenticated middleware) ---
+app.get('/',
+    (req, res, next) => { // <--- HTTPS Redirect Middleware (specific to '/' route)
+        if (!req.secure) { // Check if the request is NOT secure (HTTP)
+            const httpsUrl = 'https://' + req.headers.host + req.url; // Construct HTTPS URL
+            return res.redirect(httpsUrl); // Redirect to HTTPS
+        }
+        next(); // If already HTTPS, proceed to the next middleware/handler
+    },
+    ensureAuthenticated, // <--- Existing authentication middleware
+    (req, res) => {      // <--- Your original route handler
+        console.log('Logged in user object:', req.user);
+
+        res.render('index', { user: req.user });
+    }
+);
+
+httpApp.get('/', (req, res) => { // Add '/' route to httpApp for REDIRECT
+    const httpsUrl = `https://${req.headers.host.split(':')[0]}:3443/`; // Construct HTTPS URL (assuming port 443 or default HTTPS)
+    res.redirect(httpsUrl); // Redirect to HTTPS version of UI
+});
+
+app.use((req, res, next) => {
+    if (req.url === '/usage') { // Skip HTTPS redirect for /usage route
+        return next();
+    }
+    if (req.secure) {
+        next(); // Already HTTPS
+    } else {
+        const httpsUrl = 'https://' + req.headers.host + req.url;
+        res.redirect(httpsUrl); // Redirect to HTTPS for all other routes
+    }
+});
+
+
+app.get('/usage/custom-query', ensureAuthenticated, (req, res) => {
+    const sql = req.query.sql;
+
+    if (!sql) {
+        return res.status(400).json({ error: 'SQL query parameter is missing.' });
+    }
+
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            console.error('Database error executing custom query:', err);
+            return res.status(500).json({ error: 'Failed to execute custom query.', details: err.message });
+        }
+        res.json(rows);
+    });
 });
 
 
@@ -92,17 +261,16 @@ function validateData(data) {
 }
 
 // Endpoint to receive usage data
-app.post('/usage', (req, res) => {
+httpApp.post('/usage', (req, res) => {
     const data = req.body;
 
-    // Validate the data
     if (!validateData(data)) {
         return res.status(400).json({ error: 'Invalid data format.' });
     }
 
-    // Generate server-side timestamp in UTC format (like 'YYYY-MM-DDTHH:MM:SSZ')
-    const now = new Date();
-    const timestamp = now.toISOString().replace(/\..+/, 'Z'); // Format to match C-code style
+	    const now = new Date();
+    const timestamp = now.toISOString();
+
 
     // Insert the data into the database, including server-generated timestamp and username (if provided)
     const query = `
@@ -110,28 +278,28 @@ app.post('/usage', (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    db.run(
-        query,
-        [
-            data.app_name,
-            data.fqdn,
-            data.local_ip,
-            data.os_release,
-            data.cpu_arch,
-            data.app_version,
-            timestamp,
-            data.username || 'unknown' // Use provided username or default to 'unknown' if not present
-        ],
-        function (err) {
-            if (err) {
-                console.error('Database error:', err);
-                return res.status(500).json({ error: 'Failed to save data.' });
-            }
-
-            console.log('Data inserted with ID:', this.lastID);
-            res.status(201).json({ success: true, id: this.lastID });
+	db.run(
+    query,
+    [
+        data.app_name,
+        data.fqdn.toLowerCase(),
+        data.local_ip,
+        data.os_release,
+        data.cpu_arch,
+        data.app_version,
+        timestamp,
+        data.username || 'unknown'
+    ],
+    function (err) {
+        if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Failed to save data.' });
         }
-    );
+
+        console.log('Data inserted with ID:', this.lastID);
+        res.status(201).json({ success: true, id: this.lastID });
+    }
+);
 });
 
 // Endpoint to view all stored data (raw table data - may be used for debugging)
@@ -153,11 +321,31 @@ const osReleaseMap = {
     "27.00": "v2r4",
     "28.00": "v2r5",
     "29.00": "v3r1",
-    "30":    "v3r2"
+    "30.00": "v3r2"
+}; 
+
+// CPU Architecture Mapping
+const cpuArchMap = {
+    // IBM zSeries / IBM Z mappings
+    "3932":    "IBM z16",        // z16
+    "3931":    "IBM z16",        // z16
+    "8561":    "IBM z15",        // z15
+    "3907":    "IBM z14",        // z14
+    "3906":    "IBM z14",        // z14
+    "2964":    "IBM z13",        // z13
+    "2965":    "IBM z13s",       // z13s
+    "2827":    "IBM zEC12",      // zEnterprise EC12
+    "2828":    "IBM zBC12",      // zEnterprise BC12
+    "2817":    "IBM z196",       // zEnterprise 196
+    "2818":    "IBM z114",       // zEnterprise 114
+    "2097":    "IBM z10 EC",     // z10 Enterprise Class
+    "2098":    "IBM z10 BC",     // z10 Business Class
+    "2094":    "IBM z9 EC",      // z9 Enterprise Class
+    "2096":    "IBM z9 BC",      // z9 Business Class
 };
 
 // Endpoint for Usage Over Time chart
-app.get('/api/usage-over-time', (req, res) => {
+app.get('/api/usage-over-time', ensureAuthenticated, (req, res) => {
     const query = `
         SELECT DATE(timestamp) AS usage_date, COUNT(*) AS usage_count
         FROM usage
@@ -174,7 +362,7 @@ app.get('/api/usage-over-time', (req, res) => {
 });
 
 // Endpoint for Application Popularity chart
-app.get('/api/app-popularity', (req, res) => {
+app.get('/api/app-popularity', ensureAuthenticated, (req, res) => {
     const query = `
         SELECT app_name, COUNT(*) AS usage_count
         FROM usage
@@ -191,7 +379,7 @@ app.get('/api/app-popularity', (req, res) => {
 });
 
 // Endpoint for OS Distribution chart with friendly names
-app.get('/api/os-distribution', (req, res) => {
+app.get('/api/os-distribution', ensureAuthenticated, (req, res) => {
     const query = `
         SELECT os_release, COUNT(*) AS usage_count
         FROM usage
@@ -213,7 +401,7 @@ app.get('/api/os-distribution', (req, res) => {
 });
 
 // Endpoint for CPU Architecture Distribution chart
-app.get('/api/cpu-distribution', (req, res) => {
+app.get('/api/cpu-distribution', ensureAuthenticated, (req, res) => {
     const query = `
         SELECT cpu_arch, COUNT(*) AS usage_count
         FROM usage
@@ -225,12 +413,17 @@ app.get('/api/cpu-distribution', (req, res) => {
             console.error('Database error:', err);
             return res.status(500).json({ error: 'Failed to retrieve CPU architecture distribution data.' });
         }
-        res.json(rows);
+        // Apply CPU Architecture mapping to labels
+        const mappedRows = rows.map(row => ({
+            cpu_arch: cpuArchMap[row.cpu_arch] || row.cpu_arch, // Use map or original if not found
+            usage_count: row.usage_count
+        }));
+        res.json(mappedRows); // Send the mapped data
     });
 });
 
 // --- NEW API Endpoint for Hostname Usage Chart ---
-app.get('/api/hostname-usage', (req, res) => {
+app.get('/api/hostname-usage', ensureAuthenticated, (req, res) => {
     const query = `
         SELECT fqdn, COUNT(*) AS usage_count
         FROM usage
@@ -246,6 +439,28 @@ app.get('/api/hostname-usage', (req, res) => {
     });
 });
 
+// Endpoint to view raw data for a specific day
+app.get('/usage/daily-raw/:date', ensureAuthenticated, (req, res) => {
+    const selectedDate = req.params.date; // Date from URL parameter (YYYY-MM-DD)
+
+    if (!selectedDate) {
+        return res.status(400).json({ error: 'Date parameter is required.' });
+    }
+
+    const query = `
+        SELECT * FROM usage
+        WHERE DATE(timestamp) = ?
+        ORDER BY timestamp DESC
+    `;
+
+    db.all(query, [selectedDate], (err, rows) => {
+        if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Failed to retrieve daily data.' });
+        }
+        res.json(rows);
+    });
+});
 
 // Get the local IP address of the machine
 function getLocalIpAddress() {
@@ -259,6 +474,28 @@ function getLocalIpAddress() {
     }
     return '127.0.0.1'; // Fallback to localhost
 }
+
+app.get('/download-db', ensureAuthenticated, (req, res) => {
+    const dbFilePath = path.join(__dirname, 'usage_data.db');
+
+    // Check if the database file exists
+    if (!fs.existsSync(dbFilePath)) {
+        return res.status(404).send('Database file not found.');
+    }
+
+    // Set headers to force download
+    res.setHeader('Content-Disposition', 'attachment; filename=usage_data.db');
+    res.setHeader('Content-Type', 'application/octet-stream'); // Or 'application/x-sqlite3'
+
+    // Stream the database file to the response
+    const fileStream = fs.createReadStream(dbFilePath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (err) => {
+        console.error('Error streaming database file for download:', err);
+        res.status(500).send('Error serving database file.');
+    });
+});
 
 // Function to schedule weekly backups, running every Sunday at midnight
 function scheduleWeeklyBackup() {
@@ -281,21 +518,26 @@ function scheduleWeeklyBackup() {
     }, timeUntilNextBackup);
 }
 
-
-// Start the server and display the connection info
-const PORT = 3000;
-app.listen(PORT, () => {
+const httpsServer = https.createServer(credentials, app); // Use 'app' (HTTPS-secured Express app)
+const HTTPS_PORT = 3443; // Standard HTTPS port
+httpsServer.listen(HTTPS_PORT, () => {
     const ipAddress = getLocalIpAddress();
-    console.log(`Server is running! Access it via the following:`);
-    console.log(`- Local:   http://localhost:${PORT}`);
-    console.log(`- Network: http://${ipAddress}:${PORT}`);
-
-    // Create a regular backup when the server starts
-    backupDatabaseOnEvent();
-
-    // Schedule weekly backups
-    scheduleWeeklyBackup();
+    console.log(`HTTPS Server is running! UI and secured APIs accessed via:`);
+    console.log(`- Local:   https://localhost:${HTTPS_PORT}`);
+    console.log(`- Network: https://${ipAddress}:${HTTPS_PORT}`);
 });
+
+
+// --- HTTP Server Setup (ONLY for /usage route) ---
+const httpServer = http.createServer(httpApp); // Use 'httpApp' (HTTP-only Express app)
+const HTTP_PORT = 3000; // Choose a different port for HTTP, e.g., 3000
+httpServer.listen(HTTP_PORT, () => {
+    const ipAddress = getLocalIpAddress();
+    console.log(`HTTP Server is running! ONLY /usage route accessible via HTTP at:`);
+    console.log(`- Local:   http://localhost:${HTTP_PORT}/usage`); // Note: http and port 3000, /usage path
+    console.log(`- Network: http://${ipAddress}:${HTTP_PORT}/usage`); // Note: http and port 3000, /usage path
+});
+
 
 // Backup database on process exit or errors (using regular backup function)
 process.on('exit', backupDatabaseOnEvent);

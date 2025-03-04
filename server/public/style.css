@@ -17,21 +17,33 @@ h1 {
     overflow-x: auto; /* Enable horizontal scroll for wide tables */
 }
 
-#usage-table {
+#daily-usage-table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 20px;
 }
 
-#usage-table, #usage-table th, #usage-table td {
+#daily-usage-table, #daily-usage-table th, #daily-usage-table td {
     border: 1px solid #ddd;
 }
 
-#usage-table th, #usage-table td {
+#daily-usage-table th, #daily-usage-table td {
     padding: 8px;
     text-align: left;
 }
 
-#usage-table th {
+#daily-usage-table th {
     background-color: #f2f2f2;
+}
+
+/* --- Style for Custom SQL Query Textarea --- */
+#custom-sql-query {
+    width: 95%; /* Take up most of the width of its container */
+    min-height: 150px; /* Set a minimum height (adjust as needed) */
+    padding: 10px; /* Add some padding inside the textarea */
+    font-family: monospace; /* Use a monospace font for better SQL readability */
+    font-size: 14px; /* Adjust font size if needed */
+    border: 1px solid #ccc; /* Add a border for visual clarity */
+    box-sizing: border-box; /* Include padding and border in the element's total width and height */
+    resize: vertical; /* Allow vertical resizing by the user */
 }

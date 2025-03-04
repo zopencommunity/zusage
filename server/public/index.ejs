@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IBM z/OS Open Source Usage Data Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>IBM z/OS Open Source Usage Data Dashboard</h1>
+
+        <div style="text-align: right; padding-right: 20px;">
+            <% if (!user) { %>
+                <a href="/login">Login</a>  <% } else { %>
+                <a href="/logout">Logout</a> <% } %>
+        </div>
+
+    <div class="chart-container">
+        <canvas id="usageOverTimeChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="appPopularityChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="osDistributionChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="cpuDistributionChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="hostnameUsageChart"></canvas>
+    </div>
+
+    <div id="daily-raw-data-container">
+        <h2>Daily Raw Usage Data</h2>
+        <div>
+            <label for="daily-data-date">Select Date:</label>
+            <input type="date" id="daily-data-date">
+            <button id="fetch-daily-data">Fetch Data</button>
+        </div>
+        <table id="daily-usage-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>App Name</th>
+                    <th>FQDN</th>
+                    <th>Local IP</th>
+                    <th>OS Release</th>
+                    <th>CPU Arch</th>
+                    <th>App Version</th>
+                    <th>Timestamp</th>
+                    <th>Username</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="9" style="text-align:center;">Select a date and click 'Fetch Data'</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="custom-sql-container">
+        <h2>Custom SQL Query (SQLite)</h2>
+
+        <div id="custom-sql-input-help">
+            <h3>Input</h3>
+            <p>Enter your SQLite query below to fetch data from the <code>usage</code> table.</p>
+            <p><b>Tips:</b></p>
+            <ul>
+                <li><b>Schema:</b> The <code>usage</code> table has the following columns: <code>id</code>, <code>app_name</code>, <code>fqdn</code>, <code>local_ip</code>, <code>os_release</code>, <code>cpu_arch</code>, <code>app_version</code>, <code>timestamp</code>, <code>username</code>.</li>
+                <li><b>Unique Hostnames:</b> To get a list of unique hostnames (FQDNs), you can use a query like: <code>SELECT DISTINCT fqdn FROM usage;</code></li>
+                <li><b>Limit Results:</b> For large datasets, use <code>LIMIT</code> to preview data, e.g., <code>SELECT * FROM usage LIMIT 10;</code></li>
+                <li><b>Date Filtering:</b> To query data for a specific date, use the <code>DATE(timestamp)</code> function, e.g., <code>SELECT * FROM usage WHERE DATE(timestamp) = '2025-03-03';</code> (adjust date as needed).</li>
+            </ul>
+        </div>
+
+        <div>
+            <textarea id="custom-sql-query" placeholder="Enter your SQLite query here (e.g., SELECT * FROM usage LIMIT 10);"></textarea>
+            <button id="execute-sql-query">Execute Query</button>
+        </div>
+        <div id="custom-sql-results">
+            <h3>Query Results</h3>
+            <table id="custom-sql-results-table">
+                <thead>
+                    <tr>
+                        </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="9" style="text-align:center;">Enter a query and click 'Execute Query'</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+        <div id="download-db-container">
+        <h2>Download Database</h2>
+        <p><a href="/download-db">Download Zusage Database (usage_data.db)</a></p>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

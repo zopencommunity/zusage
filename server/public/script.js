@@ -1,44 +1,21 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // --- Fetch and display raw usage data (table) ---
-    fetch('/usage/raw') // Fetch raw data from /usage/raw endpoint
-        .then(response => response.json())
-        .then(data => {
-            const tableBody = document.querySelector('#usage-table tbody');
-            if (data && data.length > 0) {
-                data.forEach(row => {
-                    let tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${row.id}</td>
-                        <td>${row.app_name}</td>
-                        <td>${row.fqdn}</td>
-                        <td>${row.local_ip}</td>
-                        <td>${row.os_release}</td>
-                        <td>${row.cpu_arch}</td>
-                        <td>${row.app_version}</td>
-                        <td>${row.timestamp}</td>
-                        <td>${row.username}</td>
-                    `;
-                    tableBody.appendChild(tr);
-                });
-            } else {
-                tableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No usage data available.</td></tr>';
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching raw usage data:', error);
-            const tableBody = document.querySelector('#usage-table tbody');
-            tableBody.innerHTML = '<tr><td colspan="9" style="text-align:center; color: red;">Failed to load usage data.</td></tr>';
-        });
+    // --- Set default date to current date ---
+    const dailyDateInput = document.getElementById('daily-data-date');
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const currentDate = `${year}-${month}-${day}`;
+    dailyDateInput.value = currentDate;
 
     // --- Fetch data and create charts ---
     createUsageOverTimeChart();
     createAppPopularityChart();
     createOSDistributionChart();
     createCPUDistributionChart();
-    createHostnameUsageChart(); // <-- NEW CHART CREATION FUNCTION CALL
+    createHostnameUsageChart();
 
     // --- Chart Creation Functions ---
-
     function createUsageOverTimeChart() {
         fetch('/api/usage-over-time')
         .then(response => response.json())
@@ -253,5 +230,102 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(error => console.error('Error fetching hostname usage data:', error));
     }
+
+    // --- Daily Raw Data Fetching ---
+    const fetchDailyDataButton = document.getElementById('fetch-daily-data');
+    const dailyDataTableBody = document.querySelector('#daily-usage-table tbody');
+
+    fetchDailyDataButton.addEventListener('click', () => {
+        const selectedDate = dailyDateInput.value;
+        if (!selectedDate) {
+            alert('Please select a date.');
+            return;
+        }
+
+        // Clear previous data and show loading message
+        dailyDataTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Loading data...</td></tr>';
+
+        fetch(`/usage/daily-raw/${selectedDate}`)
+            .then(response => response.json())
+            .then(data => {
+                dailyDataTableBody.innerHTML = ''; // Clear loading message
+
+                if (data && data.length > 0) {
+                    data.forEach(row => {
+                        let tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${row.id}</td>
+                            <td>${row.app_name}</td>
+                            <td>${row.fqdn}</td>
+                            <td>${row.local_ip}</td>
+                            <td>${row.os_release}</td>
+                            <td>${row.cpu_arch}</td>
+                            <td>${row.app_version}</td>
+                            <td>${row.timestamp}</td>
+                            <td>${row.username}</td>
+                        `;
+                        dailyDataTableBody.appendChild(tr);
+                    });
+                } else {
+                    dailyDataTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No usage data available for this date.</td></tr>';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching daily usage data:', error);
+                dailyDataTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center; color: red;">Failed to load data.</td></tr>';
+            });
+    });
+
+    // --- Custom SQL Query Handling ---
+    const executeSqlQueryButton = document.getElementById('execute-sql-query');
+    const customSqlQueryTextarea = document.getElementById('custom-sql-query');
+    const customSqlResultsTableBody = document.querySelector('#custom-sql-results-table tbody');
+    const customSqlResultsTableHeaderRow = document.querySelector('#custom-sql-results-table thead tr');
+
+    executeSqlQueryButton.addEventListener('click', () => {
+        const sqlQuery = customSqlQueryTextarea.value;
+
+        if (!sqlQuery.trim()) {
+            alert('Please enter an SQL query.');
+            return;
+        }
+
+        customSqlResultsTableBody.innerHTML = '<tr><td colspan="99" style="text-align:center;">Loading query results...</td></tr>'; // Clear and show loading
+        customSqlResultsTableHeaderRow.innerHTML = ''; // Clear previous headers
+
+        fetch(`/usage/custom-query?sql=${encodeURIComponent(sqlQuery)}`) // Send SQL query to the server
+            .then(response => response.json())
+            .then(data => {
+                customSqlResultsTableBody.innerHTML = ''; // Clear loading msg
+                customSqlResultsTableHeaderRow.innerHTML = ''; // Ensure headers are clear before re-populating
+
+                if (data && data.length > 0) {
+                    // Create table headers dynamically
+                    const headers = Object.keys(data[0]); // Get column names from the first row
+                    headers.forEach(headerText => {
+                        const headerElement = document.createElement('th');
+                        headerElement.textContent = headerText;
+                        customSqlResultsTableHeaderRow.appendChild(headerElement);
+                    });
+
+                    // Populate table rows
+                    data.forEach(row => {
+                        const dataRow = document.createElement('tr');
+                        headers.forEach(header => {
+                            const cell = document.createElement('td');
+                            cell.textContent = row[header];
+                            dataRow.appendChild(cell);
+                        });
+                        customSqlResultsTableBody.appendChild(dataRow);
+                    });
+                } else {
+                    customSqlResultsTableBody.innerHTML = '<tr><td colspan="99" style="text-align:center;">No results found or query returned no data.</td></tr>';
+                }
+            })
+            .catch(error => {
+                console.error('Error executing custom SQL query:', error);
+                customSqlResultsTableBody.innerHTML = '<tr><td colspan="99" style="text-align:center; color: red;">Failed to execute query. Check console for details.</td></tr>';
+            });
+    });
 
 });
