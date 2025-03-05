@@ -26,8 +26,8 @@ if (!fs.existsSync(weeklyBackupDir)) {
 const db = new sqlite3.Database(dbFilePath);
 
 // --- HTTPS Configuration using self-signed certificate ---
-const privateKey = fs.readFileSync(path.join(__dirname, 'zusage1fyreibmcom.key'), 'utf8'); // Adjust path if needed
-const certificate = fs.readFileSync(path.join(__dirname, 'zusage1fyreibmcom.pem'), 'utf8'); // Adjust path if needed
+const privateKey = fs.readFileSync(path.join(__dirname, 'zusage1fyreibmcom.key'), 'utf8'); 
+const certificate = fs.readFileSync(path.join(__dirname, 'zusage1fyreibmcom.pem'), 'utf8'); 
 const credentials = {
     key: privateKey,
     cert: certificate
@@ -82,39 +82,9 @@ passport.use('github-ibm-oauth2', new OAuth2Strategy({ // Named strategy 'github
         clientID: process.env.OAUTH_CLIENT_ID,    
         clientSecret: process.env.OAUTH_CLIENT_SECRET,
         callbackURL: process.env.OAUTH_CALLBACK_URL,   
-        scope: 'user:email', // Example scope - adjust as needed for github.ibm.com
-        // If github.ibm.com OAuth needs user profile info from a different endpoint, configure userInfoURL and profile function:
-        // userInfoURL:  process.env.OAUTH_USER_INFO_URL, // e.g., 'https://api.github.ibm.com/user'
-        // profile: function(accessToken, done) {
-        //     // Function to extract user profile from userInfoURL response
-        //     // Example (adjust based on github.ibm.com's user info response format):
-        //     this._oauth2.get(this._userInfoURL, accessToken, function (err, body, res) {
-        //         if (err) { return done(err); }
-        //         try {
-        //             const json = JSON.parse(body);
-        //             const profile = {
-        //                 id: String(json.id), // Ensure ID is a string
-        //                 displayName: json.name,
-        //                 username: json.login,
-        //                 email: json.email // Or find email in json.emails array if needed
-        //                 // ... map other profile fields as needed ...
-        //             };
-        //             return done(null, profile);
-        //         } catch (e) {
-        //             return done(e);
-        //         }
-        //     });
-        //   },
+        scope: 'user:email', 
     },
     function(accessToken, refreshToken, profile, done) {
-        // User authentication callback function
-        // In a simple setup, we can just pass the profile to `done`.
-        // In a real app, you'd typically:
-        // 1. Find or create a user in your database based on the profile.id (or profile.username).
-        // 2. If creating, store necessary profile info in your user database.
-        // 3. Call done(null, user) with the user object from your database (or the profile if you're not using a database for users in this example).
-
-        // For this simple example, we'll just use the profile as the user:
         return done(null, profile);
     }
 ));
@@ -141,13 +111,13 @@ app.get('/auth/github-ibm/callback',
     });
 
 app.get('/logout', function(req, res){
-    req.logout(function(err) { // Added callback function for req.logout as per Passport.js >= 0.6.0
+    req.logout(function(err) {
         if (err) { return next(err); }
-        res.redirect('/login'); // Redirect to login page after logout
+        res.redirect('/login'); 
     });
 });
 
-app.get('/login', (req, res) => { // Simple login page
+app.get('/login', (req, res) => { 
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
@@ -155,12 +125,12 @@ app.get('/login', (req, res) => { // Simple login page
 // --- Middleware to ensure user is authenticated ---
 function ensureAuthenticated(req, res, next) {
     if (req.isAuthenticated()) { return next(); }
-    res.redirect('/login'); // Redirect to login page if not authenticated
+    res.redirect('/login'); 
 }
 
 // --- Protected Routes (apply ensureAuthenticated middleware) ---
 app.get('/',
-    (req, res, next) => { // <--- HTTPS Redirect Middleware (specific to '/' route)
+    (req, res, next) => { 
         if (!req.secure) { // Check if the request is NOT secure (HTTP)
             const httpsUrl = 'https://' + req.headers.host + req.url; // Construct HTTPS URL
             return res.redirect(httpsUrl); // Redirect to HTTPS
@@ -175,7 +145,7 @@ app.get('/',
     }
 );
 
-httpApp.get('/', (req, res) => { // Add '/' route to httpApp for REDIRECT
+httpApp.get('/', (req, res) => { 
     const httpsUrl = `https://${req.headers.host.split(':')[0]}:3443/`; // Construct HTTPS URL (assuming port 443 or default HTTPS)
     res.redirect(httpsUrl); // Redirect to HTTPS version of UI
 });
