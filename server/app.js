@@ -72,7 +72,13 @@ db.serialize(() => {
             username TEXT NOT NULL
         )
     `);
-    console.log('Database schema initialized/verified.');
+    db.run(`CREATE INDEX IF NOT EXISTS idx_app_name ON usage (app_name)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_timestamp_date ON usage (timestamp)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_os_release ON usage (os_release)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_cpu_arch ON usage (cpu_arch)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_fqdn ON usage (fqdn)`);
+    console.log('Indexes created.'); // Keep this line to confirm index creation
+    console.log('Database schema initialized/verified.'); // Original schema message, keep this too
 });
 
 // --- OAuth 2.0 Strategy Configuration ---
@@ -465,6 +471,66 @@ app.get('/download-db', ensureAuthenticated, (req, res) => {
         console.error('Error streaming database file for download:', err);
         res.status(500).send('Error serving database file.');
     });
+});
+
+app.get('/api/tools', ensureAuthenticated, async (req, res) => {
+    try {
+        // Directly use the globally defined 'db' object
+        if (!db) {
+            console.error('Database object is not initialized.');
+            return res.status(500).json({ error: 'Database connection not available.' });
+        }
+        const tools = await new Promise((resolve, reject) => { // Use Promise for db.all
+            db.all("SELECT DISTINCT app_name FROM usage ORDER BY app_name", [], (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(rows);
+                }
+            });
+        });
+        res.json(tools); // Send the list of tools as JSON
+    } catch (error) {
+        console.error('Error fetching tool list:', error);
+        res.status(500).json({ error: 'Failed to fetch tool list' });
+    }
+});
+
+// API endpoint to get user usage for a specific tool
+app.get('/api/tool-user-usage', ensureAuthenticated, async (req, res) => {
+    const toolName = req.query.toolName; // Get toolName from query parameter
+
+    if (!toolName) {
+        return res.status(400).json({ error: 'Tool name is required.' });
+    }
+
+    try {
+        // Directly use the globally defined 'db' object
+        if (!db) {
+            console.error('Database object is not initialized.');
+            return res.status(500).json({ error: 'Database connection not available.' });
+        }
+        const usageData = await new Promise((resolve, reject) => { // Use Promise for db.all
+            db.all(`
+                SELECT username, fqdn, COUNT(*) AS usage_count
+                FROM usage
+                WHERE app_name = ?
+                GROUP BY username, fqdn
+                ORDER BY usage_count DESC
+            `, [toolName], (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(rows);
+                }
+            });
+        });
+
+        res.json(usageData); // Send user usage data as JSON
+    } catch (error) {
+        console.error('Error fetching user usage data:', error);
+        res.status(500).json({ error: 'Failed to fetch user usage data' });
+    }
 });
 
 // Function to schedule weekly backups, running every Sunday at midnight

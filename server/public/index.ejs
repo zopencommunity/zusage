@@ -61,6 +61,29 @@
         </table>
     </div>
 
+    <div class="dashboard-section">
+       <h2>Tool User Usage</h2>
+       <label for="tool-select">Select a Tool:</label>
+       <select id="tool-select">
+           <option value="">-- Select a Tool --</option>
+       </select>
+
+       <div id="tool-user-usage-table-container">
+           <p style="text-align: center; margin-top: 10px;" id="tool-usage-loading-message" style="display:none;">Loading user usage data...</p>
+           <table id="tool-user-usage-table" class="data-table">
+               <thead>
+                   <tr>
+                       <th>Username</th>
+                       <th>System (FQDN)</th>
+                       <th>Usage Count</th>
+                   </tr>
+               </thead>
+               <tbody>
+                   </tbody>
+           </table>
+       </div>
+   </div>
+
     <div id="custom-sql-container">
         <h2>Custom SQL Query (SQLite)</h2>
 

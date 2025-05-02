@@ -16,6 +16,13 @@ document.addEventListener('DOMContentLoaded', function() {
     createHostnameUsageChart();
 
     // --- Chart Creation Functions ---
+    let usageOverTimeChart; // Declare chart variables outside functions to manage destruction
+    let appPopularityChart;
+    let osDistributionChart;
+    let cpuDistributionChart;
+    let hostnameUsageChart;
+
+
     function createUsageOverTimeChart() {
         fetch('/api/usage-over-time')
         .then(response => response.json())
@@ -24,15 +31,19 @@ document.addEventListener('DOMContentLoaded', function() {
             const usageCounts = data.map(item => item.usage_count);
 
             const ctx = document.getElementById('usageOverTimeChart').getContext('2d');
-            new Chart(ctx, {
+            if (usageOverTimeChart) {
+                usageOverTimeChart.destroy(); // Destroy existing chart if it exists
+            }
+            usageOverTimeChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Usage Count',
+                        label: 'Daily Usage Count',
                         data: usageCounts,
-                        borderColor: 'rgb(75, 192, 192)',
-                        tension: 0.1
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 2,
+                        fill: false
                     }]
                 },
                 options: {
@@ -40,10 +51,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            beginAtZero: true,
+                            type: 'logarithmic', // Use logarithmic scale for y-axis
+                            position: 'left',
                             title: {
                                 display: true,
-                                text: 'Usage Count'
+                                text: 'Usage Count' // Removed "(Logarithmic Scale)" from title
                             }
                         },
                         x: {
@@ -52,6 +64,16 @@ document.addEventListener('DOMContentLoaded', function() {
                                 text: 'Date'
                             }
                         }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Daily Usage Over Time' // Removed "(Logarithmic Y-Axis)" from chart title
+                        }
                     }
                 }
             });
@@ -59,7 +81,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => console.error('Error fetching usage over time data:', error));
     }
 
-    function createAppPopularityChart() {
+	function createAppPopularityChart() {
     fetch('/api/app-popularity')
     .then(response => response.json())
     .then(data => {
@@ -67,24 +89,28 @@ document.addEventListener('DOMContentLoaded', function() {
         const usageCounts = data.map(item => item.usage_count);
 
         const ctx = document.getElementById('appPopularityChart').getContext('2d');
-        new Chart(ctx, {
+        if (appPopularityChart) {
+            appPopularityChart.destroy(); // Destroy existing chart if it exists
+        }
+        appPopularityChart = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: labels,
                 datasets: [{
                     label: 'Usage Count',
                     data: usageCounts,
-                    backgroundColor: 'rgba(153, 102, 255, 0.7)',
-                    borderColor: 'rgba(153, 102, 255, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
                     borderWidth: 1
                 }]
             },
-            options: { // Line 122 is likely pointing here
+            options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
                     y: {
-                        beginAtZero: true,
+                        type: 'logarithmic', // Use logarithmic scale for y-axis
+                        position: 'left',
                         title: {
                             display: true,
                             text: 'Usage Count'
@@ -94,7 +120,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         title: {
                             display: true,
                             text: 'Application Name'
+                        },
+                        ticks: { // Add ticks configuration for x-axis
+                            font: {
+                                weight: 'bold' // Set font weight to bold for x-axis ticks
+                            }
                         }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'Application Popularity'
                     }
                 }
             }
@@ -120,7 +160,10 @@ document.addEventListener('DOMContentLoaded', function() {
             const usageCounts = data.map(item => item.usage_count);
 
             const ctx = document.getElementById('osDistributionChart').getContext('2d');
-            new Chart(ctx, {
+            if (osDistributionChart) {
+                osDistributionChart.destroy(); // Destroy existing chart if it exists
+            }
+            osDistributionChart = new Chart(ctx, {
                 type: 'pie',
                 data: {
                     labels: labels,
@@ -143,6 +186,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        },
+                        title: {
+                            display: true,
+                            text: 'OS Distribution'
+                        },
+                        tooltip: { // Customize tooltip to show logarithmic context
+                            callbacks: {
+                                label: (context) => {
+                                    let label = context.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed && context.parsed.valueOf() != null) {
+                                        label += 'Count: ' + context.parsed.valueOf();
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
                 }
             });
         })
@@ -157,7 +223,10 @@ document.addEventListener('DOMContentLoaded', function() {
             const usageCounts = data.map(item => item.usage_count);
 
             const ctx = document.getElementById('cpuDistributionChart').getContext('2d');
-            new Chart(ctx, {
+            if (cpuDistributionChart) {
+                cpuDistributionChart.destroy(); // Destroy existing chart if it exists
+            }
+            cpuDistributionChart = new Chart(ctx, {
                 type: 'pie',
                 data: {
                     labels: labels,
@@ -180,6 +249,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        },
+                        title: {
+                            display: true,
+                            text: 'CPU Architecture Distribution'
+                        },
+                        tooltip: { // Customize tooltip to show logarithmic context
+                            callbacks: {
+                                label: (context) => {
+                                    let label = context.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed && context.parsed.valueOf() != null) {
+                                        label += 'Count: ' + context.parsed.valueOf();
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
                 }
             });
         })
@@ -195,7 +287,10 @@ document.addEventListener('DOMContentLoaded', function() {
             const usageCounts = data.map(item => item.usage_count);
 
             const ctx = document.getElementById('hostnameUsageChart').getContext('2d');
-            new Chart(ctx, {
+            if (hostnameUsageChart) {
+                hostnameUsageChart.destroy(); // Destroy existing chart if it exists
+            }
+            hostnameUsageChart = new Chart(ctx, {
                 type: 'bar', // Or 'pie' if you prefer a pie chart for hostnames
                 data: {
                     labels: labels,
@@ -212,10 +307,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            beginAtZero: true,
+                            type: 'logarithmic', // Use logarithmic scale for y-axis
+                            position: 'left',
                             title: {
                                 display: true,
-                                text: 'Usage Count'
+                                text: 'Usage Count' // Removed "(Logarithmic Scale)" from title
                             }
                         },
                         x: {
@@ -223,6 +319,15 @@ document.addEventListener('DOMContentLoaded', function() {
                                 display: true,
                                 text: 'Hostname (FQDN)'
                             }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: 'Hostname Usage Distribution' // Removed "(Logarithmic Y-Axis)" from chart title
                         }
                     }
                 }
@@ -329,3 +434,64 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
 });
+
+function populateToolDropdown() {
+    const toolSelect = document.getElementById('tool-select');
+    fetch('/api/tools') // New API endpoint to get list of tools
+        .then(response => response.json())
+        .then(tools => {
+            tools.forEach(tool => {
+                const option = document.createElement('option');
+                option.value = tool.app_name; // Use app_name as value
+                option.textContent = tool.app_name; // Display app_name
+                toolSelect.appendChild(option);
+            });
+        })
+        .catch(error => console.error('Error fetching tool list:', error));
+}
+
+function fetchUserUsageForTool(toolName) {
+    const userUsageTableBody = document.querySelector('#tool-user-usage-table tbody'); // Target table body now
+    const loadingMessage = document.getElementById('tool-usage-loading-message');
+
+    userUsageTableBody.innerHTML = ''; // Clear previous table rows
+    loadingMessage.style.display = 'block'; // Show loading message
+
+    fetch(`/api/tool-user-usage?toolName=${encodeURIComponent(toolName)}`)
+        .then(response => response.json())
+        .then(usageData => {
+            loadingMessage.style.display = 'none'; // Hide loading message
+
+            if (usageData && usageData.length > 0) {
+                usageData.forEach(item => {
+                    const tableRow = document.createElement('tr'); // Create a table row 'tr'
+                    tableRow.innerHTML = `
+                        <td>${item.username}</td>
+                        <td>${item.fqdn}</td>
+                        <td>${item.usage_count}</td>
+                    `; // Create table data cells 'td' for each item
+                    userUsageTableBody.appendChild(tableRow); // Append row to table body
+                });
+            } else {
+                userUsageTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No usage data found for this tool.</td></tr>'; // No data message in a table row
+            }
+        })
+        .catch(error => {
+            loadingMessage.style.display = 'none'; // Ensure loading message is hidden on error
+            userUsageTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center; color: red;">Error fetching user usage data.</td></tr>'; // Error message in a table row
+            console.error('Error fetching user usage data:', error);
+        });
+}
+
+// --- Event listener for tool dropdown ---
+document.getElementById('tool-select').addEventListener('change', function() {
+    const selectedTool = this.value;
+    if (selectedTool) {
+        fetchUserUsageForTool(selectedTool);
+    } else {
+        document.getElementById('user-usage-list').innerHTML = ''; // Clear list if no tool selected
+    }
+});
+
+// --- Call populateToolDropdown on page load (after DOM is ready) ---
+populateToolDropdown();
