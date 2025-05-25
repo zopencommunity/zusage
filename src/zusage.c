@@ -141,6 +141,43 @@ void print_debug(const char *format, ...) {
 #define END_TIMER(label)
 #endif
 
+// Avoid blocking on timeout
+int connect_with_timeout(int sockfd, const struct sockaddr *addr, socklen_t addrlen, int timeout_sec) {
+  int flags = fcntl(sockfd, F_GETFL, 0);
+  fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+
+  int res = connect(sockfd, addr, addrlen);
+  if (res == 0) {
+    fcntl(sockfd, F_SETFL, flags); // restore blocking mode
+    return 0;
+  } else if (errno != EINPROGRESS) {
+    return -1;
+  }
+
+  fd_set wfds;
+  FD_ZERO(&wfds);
+  FD_SET(sockfd, &wfds);
+
+  struct timeval tv;
+  tv.tv_sec = timeout_sec;
+  tv.tv_usec = 0;
+
+  res = select(sockfd + 1, NULL, &wfds, NULL, &tv);
+  if (res <= 0) {
+    return -1;
+  }
+
+  int so_error;
+  socklen_t len = sizeof(so_error);
+  getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len);
+  if (so_error != 0) {
+    return -1;
+  }
+
+  fcntl(sockfd, F_SETFL, flags);
+  return 0;
+}
+
 size_t write_data(void *ptr, size_t size, size_t nmemb, FILE *stream) {
   if (!ptr || !stream) {
     print_debug("write_data: Invalid input parameters.");
@@ -653,7 +690,7 @@ void *send_usage_data() {
     free(username); // Free username as well
   }
 
-  if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+  if (connect_with_timeout(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr), 2) < 0) {
     print_debug("ERROR connecting to %s:%d", hostname, port);
     close(sockfd);
     free(os_release);
